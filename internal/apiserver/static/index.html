@@ -138,16 +138,24 @@
 
   <div class="summary">
     <div class="card">
-      <h3>Güncel bakiye (USDT)</h3>
+      <h3>Güncel bakiye (Futures)</h3>
       <div id="balance" class="value neutral">-</div>
     </div>
     <div class="card">
-      <h3>Kullanılabilir (USDT)</h3>
+      <h3>Kullanılabilir (Futures)</h3>
       <div id="availableBalance" class="value neutral">-</div>
     </div>
     <div class="card">
-      <h3>Toplam PnL (USDT)</h3>
+      <h3>Toplam PnL</h3>
       <div id="totalPnl" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Son 24 saat PnL</h3>
+      <div id="pnlLast24h" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Bugün PnL (00:00 UTC)</h3>
+      <div id="pnlToday" class="value neutral">-</div>
     </div>
     <div class="card">
       <h3>Açık pozisyon</h3>
@@ -156,6 +164,10 @@
     <div class="card">
       <h3>Kapalı işlem</h3>
       <div id="closedCount" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Sunucu IP (Binance)</h3>
+      <div id="serverIp" class="value neutral" style="font-size:0.95rem;">-</div>
     </div>
   </div>
 
@@ -237,6 +249,13 @@
       return d.toLocaleString('tr');
     }
 
+    function setPnlEl(id, val) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var n = val != null ? Number(val) : 0;
+      el.textContent = fmtNum(n);
+      el.className = 'value ' + (n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral');
+    }
     function setSummary(data, unrealizedSum) {
       const realized = data.total_pnl != null ? Number(data.total_pnl) : 0;
       const unrealized = (unrealizedSum != null ? Number(unrealizedSum) : 0) || 0;
@@ -244,6 +263,8 @@
       const pnlEl = document.getElementById('totalPnl');
       pnlEl.textContent = fmtNum(total);
       pnlEl.className = 'value ' + (total > 0 ? 'positive' : total < 0 ? 'negative' : 'neutral');
+      setPnlEl('pnlLast24h', data.pnl_last_24h);
+      setPnlEl('pnlToday', data.pnl_today);
       document.getElementById('openCount').textContent = data.open_count != null ? String(data.open_count) : '-';
       document.getElementById('closedCount').textContent = data.closed_count != null ? String(data.closed_count) : '-';
       const badge = document.getElementById('openBadge');
@@ -456,7 +477,21 @@
         });
     }
 
+    function loadServerIp() {
+      fetch('/api/my-ip')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var el = document.getElementById('serverIp');
+          if (el) el.textContent = d.ip || '-';
+        })
+        .catch(function() {
+          var el = document.getElementById('serverIp');
+          if (el) el.textContent = '-';
+        });
+    }
+
     loadAll();
+    loadServerIp();
     setInterval(loadAll, 10000);
   </script>
 </body>

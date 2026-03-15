@@ -2,10 +2,13 @@ package apiserver
 
 import (
 	_ "embed"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"binancebot/internal/binance"
 	"binancebot/internal/db"
@@ -16,8 +19,24 @@ import (
 //go:embed static/index.html
 var indexHTML []byte
 
+func logOutboundIP() {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("https://api.ipify.org")
+	if err != nil {
+		log.Printf("[api] sunucu outbound IP alınamadı: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	ip := strings.TrimSpace(string(body))
+	if ip != "" {
+		log.Printf("[api] sunucu outbound IP (Binance kısıtı için): %s", ip)
+	}
+}
+
 // Run dashboard API'yi PORT'ta başlatır ve bloke eder. Bot ile aynı process'te çalışacaksa goroutine'de çağır: go apiserver.Run(store, bnClient)
 func Run(store *db.Store, bnClient *binance.Client) {
+	logOutboundIP()
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
@@ -102,20 +121,35 @@ func Run(store *db.Store, bnClient *binance.Client) {
 			c.JSON(http.StatusOK, gin.H{"balance": nil, "available_balance": nil, "error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"balance": bal, "available_balance": avail})
+		c.JSON(http.StatusOK, gin.H{"balance": bal, "available_balance": avail, "futures": true})
+	})
+	r.GET("/api/my-ip", func(c *gin.Context) {
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get("https://api.ipify.org")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"ip": nil, "error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		ip := strings.TrimSpace(string(body))
+		c.JSON(http.StatusOK, gin.H{"ip": ip, "hint": "Binance 'Restrict access to trusted IPs' listesine bu IP'yi ekle"})
 	})
 	r.GET("/api/summary", func(c *gin.Context) {
-		total, err := store.TotalRealizedPnl(c.Request.Context())
+		ctx := c.Request.Context()
+		total, err := store.TotalRealizedPnl(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		openList, err := store.OpenTrades(c.Request.Context())
+		pnl24h, _ := store.RealizedPnlLast24h(ctx)
+		pnlToday, _ := store.RealizedPnlToday(ctx)
+		openList, err := store.OpenTrades(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		openCount, closedCount, _ := store.TradeCounts(c.Request.Context())
+		openCount, closedCount, _ := store.TradeCounts(ctx)
 		openPositions := make([]gin.H, 0, len(openList))
 		for _, o := range openList {
 			openPositions = append(openPositions, gin.H{
@@ -125,6 +159,8 @@ func Run(store *db.Store, bnClient *binance.Client) {
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"total_pnl":      total,
+			"pnl_last_24h":   pnl24h,
+			"pnl_today":      pnlToday,
 			"open_positions": openPositions,
 			"open_count":     openCount,
 			"closed_count":   closedCount,

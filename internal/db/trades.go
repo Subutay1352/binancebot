@@ -183,6 +183,27 @@ func (s *Store) TotalRealizedPnl(ctx context.Context) (float64, error) {
 	return *total, nil
 }
 
+// RealizedPnlLast24h son 24 saatte kapanan işlemlerin toplam realized PnL (rolling window).
+func (s *Store) RealizedPnlLast24h(ctx context.Context) (float64, error) {
+	var total *float64
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '24 hours'`).Scan(&total)
+	if err != nil || total == nil {
+		return 0, err
+	}
+	return *total, nil
+}
+
+// RealizedPnlToday bugün 00:00 (UTC) sonrası kapanan işlemlerin toplam realized PnL.
+func (s *Store) RealizedPnlToday(ctx context.Context) (float64, error) {
+	todayStart := time.Now().UTC().Truncate(24 * time.Hour)
+	var total *float64
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE closed_at IS NOT NULL AND closed_at >= $1`, todayStart).Scan(&total)
+	if err != nil || total == nil {
+		return 0, err
+	}
+	return *total, nil
+}
+
 // TradeCounts açık ve kapalı pozisyon sayılarını döner (debug / özet için).
 func (s *Store) TradeCounts(ctx context.Context) (open, closed int, err error) {
 	err = s.pool.QueryRow(ctx, `SELECT COUNT(*) FILTER (WHERE closed_at IS NULL), COUNT(*) FILTER (WHERE closed_at IS NOT NULL) FROM trades`).Scan(&open, &closed)
