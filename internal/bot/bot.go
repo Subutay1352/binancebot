@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -37,6 +36,9 @@ type Bot struct {
 
 	openSlotMu    sync.Mutex // Açılış sırasında race önler
 	reservedSlots int       // Şu an openPosition() içinde olan executor sayısı (açılış bitince hemen düşer)
+
+	rateLimitMu   sync.Mutex
+	rateLimitUntil time.Time // -1003 ban süresi; bu süreye kadar scanner/executor API çağrısı yapmaz
 }
 
 // New Bot oluşturur. checkInterval = scanner'ın tüm sembolleri tarama sıklığı.
@@ -112,12 +114,16 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	runScan := func() {
-		// Her turda env listesini rastgele sırayla tara (aynı sıra tekrarlanmasın)
-		scanOrder := make([]string, len(symbols))
-		copy(scanOrder, symbols)
-		rand.Shuffle(len(scanOrder), func(i, j int) { scanOrder[i], scanOrder[j] = scanOrder[j], scanOrder[i] })
-		log.Printf("[scanner] tur başladı | sembol sayısı=%d (rastgele sıra)", len(scanOrder))
-		for _, symbol := range scanOrder {
+		if b.isRateLimited() {
+			log.Printf("[scanner] tur atlandı (Binance rate limit, ban süresi dolana kadar bekleniyor)")
+			return
+		}
+		log.Printf("[scanner] tur başladı | sembol sayısı=%d (sırayla)", len(symbols))
+		for _, symbol := range symbols {
+			if b.isRateLimited() {
+				log.Printf("[scanner] rate limit, tur yarıda kesildi")
+				break
+			}
 			symbol := symbol
 			if b.cfg.Trade.MaxOpenTrades > 0 {
 				openList, err := b.store.OpenTrades(ctx)
@@ -131,6 +137,7 @@ func (b *Bot) Run(ctx context.Context) {
 				}
 			}
 			if err := b.scanOne(ctx, symbol); err != nil {
+				b.setRateLimitFromError(err)
 				log.Printf("[scanner] %s hata: %v", symbol, err)
 				_ = b.telegram.Send(ctx, "⚠️ Scanner "+symbol+": "+err.Error())
 			}
@@ -260,6 +267,9 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 			log.Printf("[executor] %s iptal (ctx)", symbol)
 			return
 		case <-ticker.C:
+			if b.isRateLimited() {
+				continue
+			}
 			openTrade, err := b.store.OpenTradeBySymbol(ctx, symbol)
 			if err != nil || openTrade == nil {
 				log.Printf("[executor] %s açık kayıt yok, bitiriliyor", symbol)
@@ -267,6 +277,7 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 			}
 			stillOpen, err := b.isPositionStillOpen(ctx, openTrade)
 			if err != nil {
+				b.setRateLimitFromError(err)
 				log.Printf("[executor] %s pozisyon kontrolü hata: %v", symbol, err)
 				continue
 			}
@@ -295,6 +306,58 @@ func (b *Bot) isPositionStillOpen(ctx context.Context, t *db.Trade) (bool, error
 		return true, nil
 	}
 	return false, nil
+}
+
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "1003") || strings.Contains(s, "Way too many requests")
+}
+
+// parseBannedUntil "banned until 1773613498556" (ms) çıkarır; yoksa now+10dk.
+func parseBannedUntil(err error) time.Time {
+	if err == nil {
+		return time.Now().Add(10 * time.Minute)
+	}
+	s := err.Error()
+	const prefix = "banned until "
+	if i := strings.Index(s, prefix); i >= 0 {
+		s = s[i+len(prefix):]
+		for j := 0; j < len(s); j++ {
+			if s[j] < '0' || s[j] > '9' {
+				s = s[:j]
+				break
+			}
+		}
+		if ms, e := strconv.ParseInt(s, 10, 64); e == nil && ms > 0 {
+			return time.UnixMilli(ms)
+		}
+	}
+	return time.Now().Add(10 * time.Minute)
+}
+
+func (b *Bot) isRateLimited() bool {
+	b.rateLimitMu.Lock()
+	defer b.rateLimitMu.Unlock()
+	return time.Now().Before(b.rateLimitUntil)
+}
+
+func (b *Bot) setRateLimitFromError(err error) {
+	if !isRateLimitError(err) {
+		return
+	}
+	until := parseBannedUntil(err)
+	b.rateLimitMu.Lock()
+	already := time.Now().Before(b.rateLimitUntil)
+	if until.After(b.rateLimitUntil) {
+		b.rateLimitUntil = until
+	}
+	b.rateLimitMu.Unlock()
+	if !already {
+		log.Printf("[rate_limit] Binance -1003 ban algılandı, %v kadar API çağrısı yapılmayacak", until.Sub(time.Now()).Round(time.Second))
+	}
 }
 
 func (b *Bot) isActive(symbol string) bool {
