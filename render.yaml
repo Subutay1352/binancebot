@@ -1,17 +1,15 @@
-# Render Blueprint - Binance Bot API
+# Tek servis = bot (go run ./cmd/bot ile aynı). Dashboard aynı process'te PORT'ta açılır.
 # https://render.com/docs/blueprint-spec
-# Dashboard'da Environment Variables eklemeyi unutma (DATABASE_URL, BINANCE_*, TELEGRAM_* vb.)
 
 services:
   - type: web
     runtime: docker
-    name: binancebot-api
+    name: binancebot
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Render otomatik PORT verir; api/main.go zaten PORT env kullanıyor
     envVars:
       - key: DATABASE_URL
-        sync: false   # Render Dashboard'dan veya bağlı Postgres'ten ekle
+        sync: false
       - key: BINANCE_API_KEY
         sync: false
       - key: BINANCE_SECRET_KEY
@@ -21,4 +19,28 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TRADE_SYMBOLS
+        sync: false
+      - key: STOP_LOSS_PERCENT
+        sync: false
+      - key: TAKE_PROFIT_PERCENT
+        sync: false
+      - key: POSITION_SIZE_USD
+        sync: false
+      - key: MAX_OPEN_TRADES
+        sync: false
+      - key: EXECUTOR_POLL_INTERVAL_SEC
+        sync: false
+      - key: STRATEGY_INTERVAL
+        sync: false
+      - key: STRATEGY_RSI_PERIOD
+        sync: false
+      - key: STRATEGY_RSI_LOW
+        sync: false
+      - key: STRATEGY_RSI_HIGH
+        sync: false
+      - key: STRATEGY_MIN_VOLUME_USD
+        sync: false
+      - key: STRATEGY_VOLUME_RATIO
         sync: false

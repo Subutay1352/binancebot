@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"binancebot/config"
+	"binancebot/internal/apiserver"
 	"binancebot/internal/binance"
 	"binancebot/internal/bot"
 	"binancebot/internal/db"
@@ -31,6 +32,10 @@ func main() {
 	defer store.Close()
 
 	client := binance.NewClient(cfg)
+
+	// Dashboard API aynı process'te (Render'da PORT'ta dinler, UI takip için)
+	go apiserver.Run(store, client)
+
 	strat := strategy.NewExample(client, cfg.Strategy)
 	tg := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 

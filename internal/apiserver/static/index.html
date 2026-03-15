@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Binance Bot</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      margin: 0;
+      padding: 1.25rem;
+      background: #0f1419;
+      color: #e7e9ea;
+      min-height: 100vh;
+    }
+    h1 {
+      margin: 0 0 1rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+    .summary {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: #1a1f26;
+      padding: 1rem 1.25rem;
+      border-radius: 10px;
+      min-width: 140px;
+      border: 1px solid #2f3640;
+    }
+    .card h3 {
+      margin: 0 0 0.35rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #8b98a5;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .card .value {
+      font-size: 1.35rem;
+      font-weight: 600;
+    }
+    .card .value.positive { color: #00ba7c; }
+    .card .value.negative { color: #f4212e; }
+    .card .value.neutral { color: #e7e9ea; }
+    .section {
+      margin-bottom: 1.5rem;
+    }
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      color: #e7e9ea;
+    }
+    .section-title .badge {
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      margin-left: 0.5rem;
+      background: #2f3640;
+      color: #8b98a5;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1a1f26;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #2f3640;
+    }
+    th, td {
+      padding: 0.65rem 0.9rem;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    th {
+      background: #161b22;
+      color: #8b98a5;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    tr:nth-child(even) { background: #161b22; }
+    tr:hover { background: #1e252d; }
+    .side-long { color: #00ba7c; }
+    .side-short { color: #f4212e; }
+    .status-open { color: #00ba7c; font-weight: 500; }
+    .status-closed { color: #8b98a5; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .btn {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-primary {
+      background: #1d9bf0;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #1a8cd8; }
+    .loading, .error {
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    .loading { background: #1a1f26; color: #8b98a5; }
+    .error { background: #2d1b1b; color: #f4212e; }
+    .empty {
+      padding: 2rem;
+      text-align: center;
+      color: #8b98a5;
+      background: #1a1f26;
+      border-radius: 10px;
+      border: 1px dashed #2f3640;
+    }
+    .pnl-pos { color: #00ba7c; font-weight: 500; }
+    .pnl-neg { color: #f4212e; font-weight: 500; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+    .toolbar .hint { color: #6e7681; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>Binance Bot</h1>
+
+  <div class="summary">
+    <div class="card">
+      <h3>Güncel bakiye (USDT)</h3>
+      <div id="balance" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Kullanılabilir (USDT)</h3>
+      <div id="availableBalance" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Toplam PnL (USDT)</h3>
+      <div id="totalPnl" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Açık pozisyon</h3>
+      <div id="openCount" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Kapalı işlem</h3>
+      <div id="closedCount" class="value neutral">-</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button type="button" id="btnRefresh" class="btn btn-primary" onclick="loadAll()">Yenile</button>
+    <span id="lastUpdate" style="color:#8b98a5;font-size:0.85rem;"></span>
+    <span class="hint">· Otomatik yenileme: 10 sn</span>
+  </div>
+
+  <div id="loadError" class="error" style="display:none;"></div>
+
+  <div class="section">
+    <div class="section-title">Açık pozisyonlar <span id="openBadge" class="badge">0</span></div>
+    <div id="openTableWrap" class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Yön</th>
+            <th>Giriş fiyat</th>
+            <th>Miktar</th>
+            <th>USDT</th>
+            <th>Anlık fiyat</th>
+            <th>Bekleyen PnL</th>
+            <th>Stop loss</th>
+            <th>Take profit</th>
+            <th>Açılış</th>
+          </tr>
+        </thead>
+        <tbody id="openTbody"></tbody>
+      </table>
+    </div>
+    <div id="openEmpty" class="empty" style="display:none;">Açık pozisyon yok.</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Son işlemler</div>
+    <div id="tradesTableWrap" class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Yön</th>
+            <th>Giriş</th>
+            <th>Miktar</th>
+            <th>USDT</th>
+            <th>SL / TP</th>
+            <th>PnL</th>
+            <th>Durum</th>
+            <th>Açılış</th>
+            <th>Kapanış</th>
+          </tr>
+        </thead>
+        <tbody id="tradesTbody"></tbody>
+      </table>
+    </div>
+    <div id="tradesEmpty" class="empty" style="display:none;">İşlem kaydı yok.</div>
+  </div>
+
+  <script>
+    function fmtNum(x) {
+      if (x == null || x === undefined) return '-';
+      const n = Number(x);
+      if (isNaN(n)) return '-';
+      return n.toLocaleString('tr', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    }
+    function fmtPrice(x) {
+      if (x == null || x === undefined) return '-';
+      const n = Number(x);
+      if (isNaN(n)) return '-';
+      return n.toLocaleString('tr', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+    }
+    function fmtDate(s) {
+      if (!s) return '-';
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return '-';
+      return d.toLocaleString('tr');
+    }
+
+    function setSummary(data, unrealizedSum) {
+      const realized = data.total_pnl != null ? Number(data.total_pnl) : 0;
+      const unrealized = (unrealizedSum != null ? Number(unrealizedSum) : 0) || 0;
+      const total = realized + unrealized;
+      const pnlEl = document.getElementById('totalPnl');
+      pnlEl.textContent = fmtNum(total);
+      pnlEl.className = 'value ' + (total > 0 ? 'positive' : total < 0 ? 'negative' : 'neutral');
+      document.getElementById('openCount').textContent = data.open_count != null ? String(data.open_count) : '-';
+      document.getElementById('closedCount').textContent = data.closed_count != null ? String(data.closed_count) : '-';
+      const badge = document.getElementById('openBadge');
+      if (badge) badge.textContent = data.open_count != null ? String(data.open_count) : '0';
+    }
+    function setBalance(bal, avail) {
+      var el = document.getElementById('balance');
+      if (el) { el.textContent = bal != null ? fmtNum(bal) : '-'; el.className = 'value neutral'; }
+      el = document.getElementById('availableBalance');
+      if (el) { el.textContent = avail != null ? fmtNum(avail) : '-'; el.className = 'value neutral'; }
+    }
+
+    function renderOpenPositions(trades) {
+      const open = Array.isArray(trades) ? trades : [];
+      const tbody = document.getElementById('openTbody');
+      const wrap = document.getElementById('openTableWrap');
+      const empty = document.getElementById('openEmpty');
+      if (!tbody) return;
+      if (open.length === 0) {
+        if (wrap) wrap.style.display = 'none';
+        if (empty) { empty.style.display = 'block'; empty.textContent = 'Açık pozisyon yok.'; }
+        tbody.innerHTML = '';
+        return;
+      }
+      if (wrap) wrap.style.display = 'block';
+      if (empty) empty.style.display = 'none';
+      tbody.innerHTML = open.map(function(t) {
+        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const sideClass = isLong ? 'side-long' : 'side-short';
+        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const qty = Number(t.quantity) || 0;
+        const entry = Number(t.entry_price) || 0;
+        const usdtVal = qty && entry ? qty * entry : null;
+        const upnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl) : null;
+        const pnlClass = upnl != null ? (upnl > 0 ? 'pnl-pos' : upnl < 0 ? 'pnl-neg' : '') : '';
+        return '<tr>' +
+          '<td>' + (t.symbol || '-') + '</td>' +
+          '<td class="' + sideClass + '">' + sideLabel + '</td>' +
+          '<td>' + fmtPrice(t.entry_price) + '</td>' +
+          '<td>' + fmtNum(t.quantity) + '</td>' +
+          '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
+          '<td>' + fmtPrice(t.current_price) + '</td>' +
+          '<td class="' + pnlClass + '">' + (upnl != null ? fmtNum(upnl) : '-') + '</td>' +
+          '<td>' + fmtPrice(t.stop_loss) + '</td>' +
+          '<td>' + fmtPrice(t.take_profit) + '</td>' +
+          '<td>' + fmtDate(t.opened_at) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function renderTrades(trades) {
+      const list = Array.isArray(trades) ? trades : [];
+      const tbody = document.getElementById('tradesTbody');
+      const wrap = document.getElementById('tradesTableWrap');
+      const empty = document.getElementById('tradesEmpty');
+      if (!tbody) return;
+      if (list.length === 0) {
+        if (wrap) wrap.style.display = 'none';
+        if (empty) { empty.style.display = 'block'; empty.textContent = 'İşlem kaydı yok.'; }
+        tbody.innerHTML = '';
+        return;
+      }
+      if (wrap) wrap.style.display = 'block';
+      if (empty) empty.style.display = 'none';
+      tbody.innerHTML = list.map(function(t) {
+        const sl = t.stop_loss != null ? fmtPrice(t.stop_loss) : '-';
+        const tp = t.take_profit != null ? fmtPrice(t.take_profit) : '-';
+        const pnlVal = t.realized_pnl != null ? Number(t.realized_pnl) : null;
+        const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
+        const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
+        const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
+        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const sideClass = isLong ? 'side-long' : 'side-short';
+        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const qty = Number(t.quantity) || 0;
+        const entry = Number(t.entry_price) || 0;
+        const usdtVal = qty && entry ? qty * entry : null;
+        return '<tr>' +
+          '<td>' + (t.symbol || '-') + '</td>' +
+          '<td class="' + sideClass + '">' + sideLabel + '</td>' +
+          '<td>' + fmtPrice(t.entry_price) + '</td>' +
+          '<td>' + fmtNum(t.quantity) + '</td>' +
+          '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
+          '<td>' + sl + ' / ' + tp + '</td>' +
+          '<td class="' + pnlClass + '">' + pnlStr + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td>' + fmtDate(t.opened_at) + '</td>' +
+          '<td>' + fmtDate(t.closed_at) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function showError(msg) {
+      var el = document.getElementById('loadError');
+      if (el) { el.textContent = msg; el.style.display = 'block'; }
+    }
+    function hideError() {
+      var el = document.getElementById('loadError');
+      if (el) el.style.display = 'none';
+    }
+
+    function loadAll() {
+      hideError();
+      var btn = document.getElementById('btnRefresh');
+      if (btn) { btn.disabled = true; btn.textContent = 'Yükleniyor...'; }
+      document.getElementById('lastUpdate').textContent = '';
+
+      var summaryDone = false;
+      var openDone = false;
+      var tradesDone = false;
+      var balanceDone = false;
+      var summaryData = null;
+      var openPositionsLiveData = null;
+
+      function tryFinish() {
+        if (!summaryDone || !openDone || !tradesDone || !balanceDone) return;
+        var unrealized = 0;
+        if (openPositionsLiveData && Array.isArray(openPositionsLiveData)) {
+          openPositionsLiveData.forEach(function(t) { unrealized += Number(t.unrealized_pnl) || 0; });
+        }
+        if (summaryData) setSummary(summaryData, unrealized);
+        document.getElementById('lastUpdate').textContent = 'Son güncelleme: ' + new Date().toLocaleTimeString('tr');
+        if (btn) { btn.disabled = false; btn.textContent = 'Yenile'; }
+      }
+
+      fetch('/api/balance')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          setBalance(d.balance, d.available_balance);
+          balanceDone = true;
+          tryFinish();
+        })
+        .catch(function() {
+          setBalance(null, null);
+          balanceDone = true;
+          tryFinish();
+        });
+
+      fetch('/api/summary')
+        .then(function(r) {
+          if (!r.ok) throw new Error('Özet alınamadı: ' + r.status);
+          return r.json();
+        })
+        .then(function(d) {
+          summaryData = d;
+          summaryDone = true;
+          tryFinish();
+        })
+        .catch(function(e) {
+          showError('Özet yüklenemedi: ' + (e.message || 'bilinmeyen hata'));
+          summaryData = {};
+          summaryDone = true;
+          tryFinish();
+        });
+
+      fetch('/api/open-positions-live')
+        .then(function(r) {
+          if (!r.ok) throw new Error('Açık pozisyonlar alınamadı: ' + r.status);
+          return r.json();
+        })
+        .then(function(list) {
+          var arr = Array.isArray(list) ? list : [];
+          openPositionsLiveData = arr;
+          renderOpenPositions(arr);
+          openDone = true;
+          tryFinish();
+        })
+        .catch(function(e) {
+          showError('Açık pozisyonlar yüklenemedi: ' + (e.message || 'bilinmeyen hata'));
+          openPositionsLiveData = [];
+          renderOpenPositions([]);
+          openDone = true;
+          tryFinish();
+        });
+
+      fetch('/api/trades?limit=50')
+        .then(function(r) {
+          if (!r.ok) throw new Error('İşlemler alınamadı: ' + r.status);
+          return r.json();
+        })
+        .then(function(list) {
+          renderTrades(Array.isArray(list) ? list : []);
+          tradesDone = true;
+          tryFinish();
+        })
+        .catch(function(e) {
+          showError('İşlemler yüklenemedi: ' + (e.message || 'bilinmeyen hata'));
+          renderTrades([]);
+          tradesDone = true;
+          tryFinish();
+        });
+    }
+
+    loadAll();
+    setInterval(loadAll, 10000);
+  </script>
+</body>
+</html>
