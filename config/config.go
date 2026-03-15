@@ -57,8 +57,15 @@ type StrategyConfig struct {
 	RSIPeriod         int     // 14
 	RSIThresholdLow   float64 // Long için RSI bu değerin altındaysa (örn 10)
 	RSIThresholdHigh  float64 // Short için RSI bu değerin üstündeyse (örn 90)
-	MinVolumeUSD      float64 // Hacim en az bu kadar USD (örn 1_000_000)
-	VolumeRatioVsPrev float64 // Son mumdan en az bu katı (örn 3)
+	MinVolumeUSD      float64 // Hacim en az bu kadar USD
+	VolumeRatioVsPrev float64 // Son mumdan en az bu katı
+	VolumeAvgPeriod   int     // Ortalama hacim için son N mum (0=kapalı)
+	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.0)
+	MAPeriod          int     // Trend filtresi MA periyodu (0=kapalı)
+	HigherTFInterval  string  // Çok TF RSI için üst zaman dilimi (örn "1h")
+	HigherTFRSIPeriod int     // Üst TF RSI periyodu
+	HigherTFRSILongMax  float64 // Long için üst TF RSI bu değerin altında olmalı (örn 50)
+	HigherTFRSIShortMin float64 // Short için üst TF RSI bu değerin üstünde olmalı (örn 50)
 }
 
 // Load .env dosyasını yükler ve Config döner.
@@ -79,12 +86,19 @@ func Load() (*Config, error) {
 		},
 		Trade: tradeConfigFromEnv(),
 		Strategy: StrategyConfig{
-			Interval30m:       env("STRATEGY_INTERVAL", "30m"),
-			RSIPeriod:         envInt("STRATEGY_RSI_PERIOD", 14),
-			RSIThresholdLow:   envFloat("STRATEGY_RSI_LOW", 10),
-			RSIThresholdHigh:  envFloat("STRATEGY_RSI_HIGH", 90),
-			MinVolumeUSD:      envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
-			VolumeRatioVsPrev: envFloat("STRATEGY_VOLUME_RATIO", 3),
+			Interval30m:         env("STRATEGY_INTERVAL", "30m"),
+			RSIPeriod:           envInt("STRATEGY_RSI_PERIOD", 14),
+			RSIThresholdLow:     envFloat("STRATEGY_RSI_LOW", 10),
+			RSIThresholdHigh:    envFloat("STRATEGY_RSI_HIGH", 90),
+			MinVolumeUSD:        envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
+			VolumeRatioVsPrev:   envFloat("STRATEGY_VOLUME_RATIO", 3),
+			VolumeAvgPeriod:     envInt("STRATEGY_VOLUME_AVG_PERIOD", 20),
+			VolumeMinRatioToAvg: envFloat("STRATEGY_VOLUME_MIN_RATIO_AVG", 1.0),
+			MAPeriod:            envInt("STRATEGY_MA_PERIOD", 20),
+			HigherTFInterval:    env("STRATEGY_HIGHER_TF_INTERVAL", "1h"),
+			HigherTFRSIPeriod:   envInt("STRATEGY_HIGHER_TF_RSI_PERIOD", 14),
+			HigherTFRSILongMax:  envFloat("STRATEGY_HIGHER_TF_RSI_LONG_MAX", 50),
+			HigherTFRSIShortMin: envFloat("STRATEGY_HIGHER_TF_RSI_SHORT_MIN", 50),
 		},
 	}, nil
 }

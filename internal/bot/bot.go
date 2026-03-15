@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -83,9 +84,40 @@ func (b *Bot) Run(ctx context.Context) {
 		log.Printf("[bot] testnet temizlik bitti")
 	}
 
+	// Başlangıçta DB ile Binance'ı senkronize et: DB'de açık görünüp borsada kapalı olanları hemen kapat
+	openList, errStart := b.store.OpenTrades(ctx)
+	if errStart == nil && len(openList) > 0 {
+		log.Printf("[bot] DB'de %d açık pozisyon var, Binance ile senkronize ediliyor...", len(openList))
+		var stillOpen []*db.Trade
+		for i := range openList {
+			t := &openList[i]
+			openOnExchange, err := b.isPositionStillOpen(ctx, t)
+			if err != nil {
+				log.Printf("[bot] %s borsa kontrolü hata (takip edilecek): %v", t.Symbol, err)
+				stillOpen = append(stillOpen, t)
+				continue
+			}
+			if !openOnExchange {
+				log.Printf("[bot] %s borsada kapalı, DB güncelleniyor (trade_id=%d)", t.Symbol, t.ID)
+				_ = b.checkPositionClosed(ctx, t, 7*24*time.Hour) // son 7 gün Income'dan PnL al
+				continue
+			}
+			stillOpen = append(stillOpen, t)
+		}
+		log.Printf("[bot] Senkronizasyon bitti: %d gerçekten açık, kapanış takibi başlatılıyor", len(stillOpen))
+		for _, t := range stillOpen {
+			b.setActive(t.Symbol, true)
+			go b.runExecutor(ctx, t.Symbol, strategy.Hold, t)
+		}
+	}
+
 	runScan := func() {
-		log.Printf("[scanner] tur başladı | sembol sayısı=%d", len(symbols))
-		for _, symbol := range symbols {
+		// Her turda env listesini rastgele sırayla tara (aynı sıra tekrarlanmasın)
+		scanOrder := make([]string, len(symbols))
+		copy(scanOrder, symbols)
+		rand.Shuffle(len(scanOrder), func(i, j int) { scanOrder[i], scanOrder[j] = scanOrder[j], scanOrder[i] })
+		log.Printf("[scanner] tur başladı | sembol sayısı=%d (rastgele sıra)", len(scanOrder))
+		for _, symbol := range scanOrder {
 			symbol := symbol
 			if b.cfg.Trade.MaxOpenTrades > 0 {
 				openList, err := b.store.OpenTrades(ctx)
@@ -159,58 +191,66 @@ func (b *Bot) scanOne(ctx context.Context, symbol string) error {
 
 	log.Printf("[scanner] %s sinyal=%s → executor başlatılıyor", symbol, sig)
 	b.setActive(symbol, true)
-	go b.runExecutor(ctx, symbol, sig)
+	go b.runExecutor(ctx, symbol, sig, nil)
 	return nil
 }
 
-// runExecutor tek sembol için: pozisyon açar, kapanana kadar bekler, kapanınca DB + bildirim yapar ve goroutine biter.
-func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signal) {
+// runExecutor tek sembol için: pozisyon açar (veya existingTrade ile sadece takip eder), kapanana kadar bekler, kapanınca DB + bildirim yapar.
+// existingTrade != nil ise yeni açılış yapılmaz, sadece borsada kapanış takip edilir (bot yeniden başladığında DB'deki açık pozisyonlar için).
+func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signal, existingTrade *db.Trade) {
 	defer b.setActive(symbol, false)
-	log.Printf("[executor] %s başladı | sinyal=%s", symbol, sig)
+	if existingTrade != nil {
+		log.Printf("[executor] %s mevcut açık pozisyon takip ediliyor (trade_id=%d)", symbol, existingTrade.ID)
+	} else {
+		log.Printf("[executor] %s başladı | sinyal=%s", symbol, sig)
+	}
 
-	// Limit: açık + "açılış yapıyor" (rezerve) sayısı max'ı geçmesin; rezerve openPosition bitince hemen düşer
-	if b.cfg.Trade.MaxOpenTrades > 0 {
-		b.openSlotMu.Lock()
-		openList, err := b.store.OpenTrades(ctx)
+	if existingTrade == nil {
+		// Limit: açık + "açılış yapıyor" (rezerve) sayısı max'ı geçmesin; rezerve openPosition bitince hemen düşer
+		if b.cfg.Trade.MaxOpenTrades > 0 {
+			b.openSlotMu.Lock()
+			openList, err := b.store.OpenTrades(ctx)
+			if err != nil {
+				b.openSlotMu.Unlock()
+				log.Printf("[executor] %s açık pozisyon sayısı alınamadı: %v", symbol, err)
+				return
+			}
+			used := len(openList) + b.reservedSlots
+			if used >= b.cfg.Trade.MaxOpenTrades {
+				b.openSlotMu.Unlock()
+				log.Printf("[executor] %s atlandı | max (açık=%d + açılışta=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
+				return
+			}
+			b.reservedSlots++
+			b.openSlotMu.Unlock()
+		}
+
+		err := b.openPosition(ctx, symbol, sig)
+		if b.cfg.Trade.MaxOpenTrades > 0 {
+			b.openSlotMu.Lock()
+			b.reservedSlots--
+			b.openSlotMu.Unlock()
+		}
 		if err != nil {
-			b.openSlotMu.Unlock()
-			log.Printf("[executor] %s açık pozisyon sayısı alınamadı: %v", symbol, err)
+			side := "SHORT"
+			if sig == strategy.Long {
+				side = "LONG"
+			}
+			var instID *string
+			if b.cfg.Trade.InstanceID != "" {
+				instID = &b.cfg.Trade.InstanceID
+			}
+			if _, dbErr := b.store.InsertPositionOpenError(ctx, symbol, side, err.Error(), instID); dbErr != nil {
+				log.Printf("[executor] %s hata DB'ye yazılamadı: %v", symbol, dbErr)
+			}
+			log.Printf("[executor] %s pozisyon açılamadı: %v", symbol, err)
+			_ = b.telegram.Send(ctx, "⚠️ "+symbol+" açılamadı: "+err.Error())
 			return
 		}
-		used := len(openList) + b.reservedSlots
-		if used >= b.cfg.Trade.MaxOpenTrades {
-			b.openSlotMu.Unlock()
-			log.Printf("[executor] %s atlandı | max (açık=%d + açılışta=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
-			return
-		}
-		b.reservedSlots++
-		b.openSlotMu.Unlock()
+		log.Printf("[executor] %s pozisyon açıldı, kapanış bekleniyor (kontrol aralığı=%v)", symbol, b.executorPollInterval())
 	}
 
-	err := b.openPosition(ctx, symbol, sig)
-	if b.cfg.Trade.MaxOpenTrades > 0 {
-		b.openSlotMu.Lock()
-		b.reservedSlots--
-		b.openSlotMu.Unlock()
-	}
-	if err != nil {
-		side := "SHORT"
-		if sig == strategy.Long {
-			side = "LONG"
-		}
-		var instID *string
-		if b.cfg.Trade.InstanceID != "" {
-			instID = &b.cfg.Trade.InstanceID
-		}
-		if _, dbErr := b.store.InsertPositionOpenError(ctx, symbol, side, err.Error(), instID); dbErr != nil {
-			log.Printf("[executor] %s hata DB'ye yazılamadı: %v", symbol, dbErr)
-		}
-		log.Printf("[executor] %s pozisyon açılamadı: %v", symbol, err)
-		_ = b.telegram.Send(ctx, "⚠️ "+symbol+" açılamadı: "+err.Error())
-		return
-	}
 	pollInterval := b.executorPollInterval()
-	log.Printf("[executor] %s pozisyon açıldı, kapanış bekleniyor (kontrol aralığı=%v)", symbol, pollInterval)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -232,7 +272,7 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 			}
 			if !stillOpen {
 				log.Printf("[executor] %s pozisyon borsada kapalı, DB güncelleniyor", symbol)
-				_ = b.checkPositionClosed(ctx, openTrade)
+				_ = b.checkPositionClosed(ctx, openTrade, 0) // az önce kapandı, son 2 dk yeter
 				return
 			}
 		}
@@ -303,9 +343,50 @@ func (b *Bot) setActive(symbol string, add bool) {
 	}
 }
 
-func (b *Bot) checkPositionClosed(ctx context.Context, t *db.Trade) error {
-	exitPrice, _ := b.client.GetPrice(ctx, t.Symbol)
-	realizedPnl := b.realizedPnl(t, exitPrice)
+// checkPositionClosed DB'de pozisyonu kapatır; exit_price ve realized_pnl borsa verisi (userTrades fill + Income PnL).
+// lookback > 0 ise (başlangıç senkronu) o süre geriye bakılır; 0 ise son ~2 dk (yeni kapanan pozisyon).
+func (b *Bot) checkPositionClosed(ctx context.Context, t *db.Trade, lookback time.Duration) error {
+	since := time.Now().Add(-2 * time.Minute)
+	if lookback > 0 {
+		since = time.Now().Add(-lookback)
+	}
+	// Gerçek kapanış fill fiyatı (userTrades)
+	exitPrice, _ := b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, since)
+	// Realized PnL her zaman Income'dan (komisyon dahil, borsa ile aynı)
+	var realizedPnl float64
+	var errIncome error
+	if lookback > 0 {
+		realizedPnl, errIncome = b.client.GetRealizedPnlSince(ctx, t.Symbol, since)
+	} else {
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					break
+				case <-time.After(2 * time.Second):
+				}
+			}
+			realizedPnl, errIncome = b.client.GetRecentRealizedPnl(ctx, t.Symbol)
+			if errIncome == nil && (realizedPnl != 0 || attempt == 2) {
+				break
+			}
+		}
+	}
+	if errIncome == nil && t.Quantity > 0 && exitPrice == 0 {
+		// userTrades'de fill yoksa exit'i Income PnL'den türet
+		if t.Side == "LONG" {
+			exitPrice = t.EntryPrice + realizedPnl/t.Quantity
+		} else {
+			exitPrice = t.EntryPrice - realizedPnl/t.Quantity
+		}
+	}
+	if exitPrice == 0 {
+		exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
+		realizedPnl = b.realizedPnl(t, exitPrice)
+		log.Printf("[trade] KAPANIŞ | exit/PNL tahmini (userTrades+Income yok)")
+	} else if exitPrice > 0 {
+		log.Printf("[trade] KAPANIŞ | exit_price userTrades (gerçek fill): %.8f | realized_pnl Income: %.4f", exitPrice, realizedPnl)
+	}
 	balanceAfter, _ := b.client.GetUSDTBalance(ctx)
 	balanceAfterPtr := &balanceAfter
 	log.Printf("[trade] KAPANIŞ | symbol=%s side=%s trade_id=%d entry=%.4f exit=%.4f quantity=%.6f realized_pnl=%.4f | bakiye_öncesi=%.2f USDT bakiye_sonrası=%.2f USDT",
@@ -355,14 +436,16 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	if quantity <= 0 {
 		return fmt.Errorf("quantity 0 veya negatif")
 	}
-	log.Printf("[trade] AÇILIŞ | symbol=%s quantity=%.6f fiyat=%.4f", symbol, quantity, price)
+	stepSize := info.MarketLotSizeFilter().StepSize
+	qtyStr := formatQtyForAPI(quantity, stepSize)
+	log.Printf("[trade] AÇILIŞ | symbol=%s quantity=%s fiyat=%.4f", symbol, qtyStr, price)
 
 	var orderResp *futures.CreateOrderResponse
 	side := "LONG"
 	if sig == strategy.Long {
-		orderResp, err = b.client.OpenLong(ctx, symbol, quantity)
+		orderResp, err = b.client.OpenLong(ctx, symbol, qtyStr)
 	} else {
-		orderResp, err = b.client.OpenShort(ctx, symbol, quantity)
+		orderResp, err = b.client.OpenShort(ctx, symbol, qtyStr)
 		side = "SHORT"
 	}
 	if err != nil {
@@ -396,21 +479,27 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	if side == "SHORT" {
 		slSide = futures.SideTypeBuy
 	}
-	qtyStr := formatQty(quantity)
 	slStr := formatPriceForAPI(slPrice, tickSize, entryDecimals)
 	tpStr := formatPriceForAPI(tpPrice, tickSize, entryDecimals)
 
 	_, errSL := b.client.PlaceStopLoss(ctx, symbol, slSide, qtyStr, slStr)
 	if errSL != nil {
 		log.Printf("[trade] SL KONAMADI | symbol=%s: %v → pozisyon kapatılıyor", symbol, errSL)
-		_ = b.client.ClosePositionMarket(ctx, symbol, side, quantity)
+		_ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
 		return fmt.Errorf("stop loss konamadı: %w", errSL)
 	}
 	_, errTP := b.client.PlaceTakeProfit(ctx, symbol, slSide, qtyStr, tpStr)
 	if errTP != nil {
 		log.Printf("[trade] TP KONAMADI | symbol=%s: %v → pozisyon kapatılıyor", symbol, errTP)
-		_ = b.client.ClosePositionMarket(ctx, symbol, side, quantity)
+		_ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
 		return fmt.Errorf("take profit konamadı: %w", errTP)
+	}
+
+	// Borsadaki gerçek ortalama giriş fiyatını kullan (slippage / fill farkı olmasın)
+	time.Sleep(500 * time.Millisecond)
+	if realEntry, err := b.client.GetPositionEntryPrice(ctx, symbol); err == nil && realEntry > 0 {
+		entryPrice = realEntry
+		log.Printf("[trade] AÇILIŞ | borsa entry_price=%.8f", entryPrice)
 	}
 
 	orderIDStr := strconv.FormatInt(orderResp.OrderID, 10)
@@ -465,6 +554,26 @@ func parseFloat(s string) float64 {
 
 func formatQty(q float64) string {
 	return fmt.Sprintf("%.8f", q)
+}
+
+// formatQtyForAPI Binance'ın kabul ettiği miktar string'i (step size hassasiyeti; -1111 precision hatasını önler).
+func formatQtyForAPI(qty float64, stepSizeStr string) string {
+	step := parseFloat(stepSizeStr)
+	if step <= 0 {
+		return fmt.Sprintf("%.8f", qty)
+	}
+	decimals := tickDecimals(step)
+	s := fmt.Sprintf("%.*f", decimals, qty)
+	// Sondaki gereksiz sıfırları kaldır
+	if strings.Contains(s, ".") {
+		for len(s) > 1 && s[len(s)-1] == '0' {
+			s = s[:len(s)-1]
+		}
+		if s[len(s)-1] == '.' {
+			s = s[:len(s)-1]
+		}
+	}
+	return s
 }
 
 func roundToTick(price float64, tickSizeStr string) float64 {

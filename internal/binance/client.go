@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"binancebot/config"
 
@@ -57,14 +58,14 @@ func (c *Client) GetPrice(ctx context.Context, symbol string) (float64, error) {
 	return parseFloat(prices[0].Price), nil
 }
 
-// OpenLong market long açar.
-func (c *Client) OpenLong(ctx context.Context, symbol string, quantity float64) (*futures.CreateOrderResponse, error) {
-	log.Printf("[binance] OPEN_LONG | symbol=%s quantity=%s", symbol, formatQty(quantity))
+// OpenLong market long açar. quantityStr step size hassasiyetinde formatlanmış olmalı (-1111 önlemek için).
+func (c *Client) OpenLong(ctx context.Context, symbol string, quantityStr string) (*futures.CreateOrderResponse, error) {
+	log.Printf("[binance] OPEN_LONG | symbol=%s quantity=%s", symbol, quantityStr)
 	resp, err := c.api.NewCreateOrderService().
 		Symbol(symbol).
 		Side(futures.SideTypeBuy).
 		Type(futures.OrderTypeMarket).
-		Quantity(formatQty(quantity)).
+		Quantity(quantityStr).
 		Do(ctx)
 	if err != nil {
 		log.Printf("[binance] OPEN_LONG hata | symbol=%s: %v", symbol, err)
@@ -74,14 +75,14 @@ func (c *Client) OpenLong(ctx context.Context, symbol string, quantity float64) 
 	return resp, nil
 }
 
-// OpenShort market short açar.
-func (c *Client) OpenShort(ctx context.Context, symbol string, quantity float64) (*futures.CreateOrderResponse, error) {
-	log.Printf("[binance] OPEN_SHORT | symbol=%s quantity=%s", symbol, formatQty(quantity))
+// OpenShort market short açar. quantityStr step size hassasiyetinde formatlanmış olmalı (-1111 önlemek için).
+func (c *Client) OpenShort(ctx context.Context, symbol string, quantityStr string) (*futures.CreateOrderResponse, error) {
+	log.Printf("[binance] OPEN_SHORT | symbol=%s quantity=%s", symbol, quantityStr)
 	resp, err := c.api.NewCreateOrderService().
 		Symbol(symbol).
 		Side(futures.SideTypeSell).
 		Type(futures.OrderTypeMarket).
-		Quantity(formatQty(quantity)).
+		Quantity(quantityStr).
 		Do(ctx)
 	if err != nil {
 		log.Printf("[binance] OPEN_SHORT hata | symbol=%s: %v", symbol, err)
@@ -101,18 +102,18 @@ func (c *Client) PlaceTakeProfit(ctx context.Context, symbol string, side future
 	return c.PlaceTakeProfitAlgo(ctx, symbol, side, stopPrice)
 }
 
-// ClosePositionMarket pozisyonu ters yönde market emirle kapatır (SL/TP konamadığında kullan).
-func (c *Client) ClosePositionMarket(ctx context.Context, symbol string, side string, quantity float64) error {
+// ClosePositionMarket pozisyonu ters yönde market emirle kapatır (SL/TP konamadığında kullan). quantityStr step size formatında.
+func (c *Client) ClosePositionMarket(ctx context.Context, symbol string, side string, quantityStr string) error {
 	closeSide := futures.SideTypeSell
 	if side == "SHORT" {
 		closeSide = futures.SideTypeBuy
 	}
-	log.Printf("[binance] CLOSE_POSITION_MARKET | symbol=%s side=%s quantity=%s", symbol, closeSide, formatQty(quantity))
+	log.Printf("[binance] CLOSE_POSITION_MARKET | symbol=%s side=%s quantity=%s", symbol, closeSide, quantityStr)
 	_, err := c.api.NewCreateOrderService().
 		Symbol(symbol).
 		Side(closeSide).
 		Type(futures.OrderTypeMarket).
-		Quantity(formatQty(quantity)).
+		Quantity(quantityStr).
 		ReduceOnly(true).
 		Do(ctx)
 	if err != nil {
@@ -135,6 +136,15 @@ func (c *Client) GetPosition(ctx context.Context, symbol string) (*futures.Posit
 		}
 	}
 	return nil, nil
+}
+
+// GetPositionEntryPrice borsadaki pozisyonun gerçek ortalama giriş fiyatını döner (Binance PositionRisk.entryPrice).
+func (c *Client) GetPositionEntryPrice(ctx context.Context, symbol string) (float64, error) {
+	pos, err := c.GetPosition(ctx, symbol)
+	if err != nil || pos == nil {
+		return 0, err
+	}
+	return parseFloat(pos.EntryPrice), nil
 }
 
 // GetOpenPositions pozisyonu olan (positionAmt != 0) tüm sembolleri döner.
@@ -164,15 +174,15 @@ func (c *Client) CloseAllOpenPositions(ctx context.Context) error {
 			continue
 		}
 		side := "LONG"
+		qtyStr := strings.TrimPrefix(p.PositionAmt, "-")
 		if amt < 0 {
 			side = "SHORT"
-			amt = -amt
 		}
-		if err := c.ClosePositionMarket(ctx, p.Symbol, side, amt); err != nil {
+		if err := c.ClosePositionMarket(ctx, p.Symbol, side, qtyStr); err != nil {
 			log.Printf("[binance] pozisyon kapatma hata | symbol=%s: %v", p.Symbol, err)
 			continue
 		}
-		log.Printf("[binance] pozisyon kapatıldı | symbol=%s side=%s qty=%.4f", p.Symbol, side, amt)
+		log.Printf("[binance] pozisyon kapatıldı | symbol=%s side=%s qty=%s", p.Symbol, side, qtyStr)
 	}
 	return nil
 }

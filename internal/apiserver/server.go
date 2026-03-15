@@ -93,7 +93,7 @@ func Run(store *db.Store, bnClient *binance.Client) {
 				"id": t.ID, "symbol": t.Symbol, "side": t.Side, "entry_price": t.EntryPrice,
 				"quantity": t.Quantity, "stop_loss": t.StopLoss, "take_profit": t.TakeProfit,
 				"opened_at": t.OpenedAt,
-				"leverage": lev, "margin_usdt": marginUSD, "notional_usdt": notional,
+				"leverage":  lev, "margin_usdt": marginUSD, "notional_usdt": notional,
 			}
 			curPrice, errPrice := bnClient.GetPrice(ctx, t.Symbol)
 			if errPrice == nil {
@@ -137,6 +137,7 @@ func Run(store *db.Store, bnClient *binance.Client) {
 	})
 	r.GET("/api/summary", func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// Toplam / 24h / bugün: hep DB'den (kapanışta Binance'ten alıp yazıyoruz, burada sadece topluyoruz)
 		total, err := store.TotalRealizedPnl(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
