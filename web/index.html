@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Binance Bot</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; background: #1a1a2e; color: #eee; }
+    h1 { margin-top: 0; }
+    .summary { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .card { background: #16213e; padding: 1rem 1.5rem; border-radius: 8px; min-width: 200px; }
+    .card h3 { margin: 0 0 0.5rem; font-size: 0.9rem; color: #94a3b8; }
+    .card .value { font-size: 1.5rem; font-weight: 600; }
+    .card .value.positive { color: #22c55e; }
+    .card .value.negative { color: #ef4444; }
+    table { width: 100%; border-collapse: collapse; background: #16213e; border-radius: 8px; overflow: hidden; }
+    th, td { padding: 0.75rem 1rem; text-align: left; }
+    th { background: #0f172a; color: #94a3b8; font-weight: 600; }
+    tr:nth-child(even) { background: #1e293b; }
+    .open { color: #22c55e; }
+    .closed { color: #94a3b8; }
+    .refresh { margin-bottom: 1rem; }
+    .refresh button { padding: 0.5rem 1rem; background: #3b82f6; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    .refresh button:hover { background: #2563eb; }
+  </style>
+</head>
+<body>
+  <h1>Binance Bot</h1>
+  <div class="summary">
+    <div class="card">
+      <h3>Toplam PnL (USDT)</h3>
+      <div id="totalPnl" class="value">-</div>
+    </div>
+    <div class="card">
+      <h3>Açık Pozisyonlar</h3>
+      <div id="openPos">Yok</div>
+    </div>
+  </div>
+  <div class="refresh">
+    <button type="button" onclick="load()">Yenile</button>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Yön</th>
+        <th>Giriş</th>
+        <th>Miktar</th>
+        <th>SL / TP</th>
+        <th>PnL</th>
+        <th>Durum</th>
+        <th>Açılış</th>
+      </tr>
+    </thead>
+    <tbody id="trades"></tbody>
+  </table>
+
+  <script>
+    function fmtNum(x) {
+      if (x == null) return '-';
+      return Number(x).toLocaleString('tr', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    }
+    function fmtPrice(x) {
+      if (x == null) return '-';
+      return Number(x).toLocaleString('tr', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+    }
+    function fmtDate(s) {
+      if (!s) return '-';
+      return new Date(s).toLocaleString('tr');
+    }
+    function load() {
+      fetch('/api/summary').then(r => r.json()).then(d => {
+        const pnlEl = document.getElementById('totalPnl');
+        pnlEl.textContent = fmtNum(d.total_pnl);
+        pnlEl.className = 'value ' + (d.total_pnl >= 0 ? 'positive' : 'negative');
+        const openEl = document.getElementById('openPos');
+        const list = d.open_positions || [];
+        if (list.length) {
+          openEl.innerHTML = list.map(o => o.symbol + ' ' + o.side + ' @ ' + fmtPrice(o.entry) + ' (x' + fmtNum(o.quantity) + ')').join('<br>');
+        } else {
+          openEl.textContent = 'Yok';
+        }
+      }).catch(e => document.getElementById('totalPnl').textContent = 'Hata');
+      fetch('/api/trades?limit=30').then(r => r.json()).then(list => {
+        const tbody = document.getElementById('trades');
+        tbody.innerHTML = list.map(t => {
+          const sl = t.stop_loss != null ? fmtPrice(t.stop_loss) : '-';
+          const tp = t.take_profit != null ? fmtPrice(t.take_profit) : '-';
+          const pnl = t.realized_pnl != null ? fmtNum(t.realized_pnl) : '-';
+          const status = t.closed_at ? '<span class="closed">Kapalı</span>' : '<span class="open">Açık</span>';
+          return '<tr><td>' + t.symbol + '</td><td>' + t.side + '</td><td>' + fmtPrice(t.entry_price) + '</td><td>' + fmtNum(t.quantity) + '</td><td>' + sl + ' / ' + tp + '</td><td>' + pnl + '</td><td>' + status + '</td><td>' + fmtDate(t.opened_at) + '</td></tr>';
+        }).join('');
+      }).catch(() => {});
+    }
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

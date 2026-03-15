@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.git
+.github
+*.md
+scripts/
+cmd/
+docs/
+*.bin
+.DS_Store

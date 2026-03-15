@@ -1,0 +1,25 @@
+# Ortam ve gizlilik
+.env
+.env.local
+.env.*.local
+
+# Derlenmiş binary
+*.bin
+/api.bin
+/bot
+/check
+/list-symbols
+/exe/
+
+# Go
+/exe/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Log
+*.log

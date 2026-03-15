@@ -1,0 +1,24 @@
+# Render Blueprint - Binance Bot API
+# https://render.com/docs/blueprint-spec
+# Dashboard'da Environment Variables eklemeyi unutma (DATABASE_URL, BINANCE_*, TELEGRAM_* vb.)
+
+services:
+  - type: web
+    runtime: docker
+    name: binancebot-api
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Render otomatik PORT verir; api/main.go zaten PORT env kullanıyor
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Render Dashboard'dan veya bağlı Postgres'ten ekle
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_SECRET_KEY
+        sync: false
+      - key: BINANCE_FUTURES_TESTNET
+        value: "true"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
