@@ -33,6 +33,9 @@ type Bot struct {
 
 	mu            sync.Mutex
 	activeSymbols map[string]struct{} // Şu an executor'da olan semboller (çift giriş engeli)
+
+	openSlotMu    sync.Mutex // Açılış sayısı race'ini önler (deploy'da 12 açılması gibi)
+	reservedSlots int       // Açılmak üzere rezerve edilmiş slot (openPosition çağrılmış ama henüz DB'ye yazılmamış)
 }
 
 // New Bot oluşturur. checkInterval = scanner'ın tüm sembolleri tarama sıklığı.
@@ -160,17 +163,29 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 	defer b.setActive(symbol, false)
 	log.Printf("[executor] %s başladı | sinyal=%s", symbol, sig)
 
-	// Limit kontrolü: DB'deki açık pozisyon sayısı max'ı aşmasın (çoklu bot/race için)
+	// Limit: DB açık + "açılmak üzere" rezerve slot sayısı max'ı geçmesin (paralel executor race'i önler)
 	if b.cfg.Trade.MaxOpenTrades > 0 {
+		b.openSlotMu.Lock()
 		openList, err := b.store.OpenTrades(ctx)
 		if err != nil {
+			b.openSlotMu.Unlock()
 			log.Printf("[executor] %s açık pozisyon sayısı alınamadı: %v", symbol, err)
 			return
 		}
-		if len(openList) >= b.cfg.Trade.MaxOpenTrades {
-			log.Printf("[executor] %s atlandı | max açık pozisyona ulaşıldı (açık=%d, max=%d)", symbol, len(openList), b.cfg.Trade.MaxOpenTrades)
+		used := len(openList) + b.reservedSlots
+		if used >= b.cfg.Trade.MaxOpenTrades {
+			b.openSlotMu.Unlock()
+			log.Printf("[executor] %s atlandı | max açık (açık=%d + rezerve=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
 			return
 		}
+		b.reservedSlots++
+		b.openSlotMu.Unlock()
+
+		defer func() {
+			b.openSlotMu.Lock()
+			b.reservedSlots--
+			b.openSlotMu.Unlock()
+		}()
 	}
 
 	if err := b.openPosition(ctx, symbol, sig); err != nil {
@@ -300,6 +315,16 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	}
 	balBefore, availBefore, _ := b.client.GetUSDTBalanceDetails(ctx)
 	log.Printf("[trade] AÇILIŞ hazırlanıyor | symbol=%s sinyal=%s | bakiye=%.2f USDT (kullanılabilir=%.2f)", symbol, sig, balBefore, availBefore)
+
+	lev := b.cfg.Trade.Leverage
+	if lev < 1 {
+		lev = 1
+	}
+	if err := b.client.SetLeverage(ctx, symbol, lev); err != nil {
+		log.Printf("[trade] %s kaldıraç ayarlanamadı (atlanıyor): %v", symbol, err)
+		return err
+	}
+
 	price, err := b.client.GetPrice(ctx, symbol)
 	if err != nil {
 		return err
@@ -372,6 +397,8 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	orderIDStr := strconv.FormatInt(orderResp.OrderID, 10)
 	balanceBeforePtr := &balBefore
 	instanceID := b.cfg.Trade.InstanceID
+	marginUSD := b.cfg.Trade.PositionSizeUSD
+	notionalUSD := quantity * entryPrice
 	t := &db.Trade{
 		Symbol:             symbol,
 		Side:               side,
@@ -382,6 +409,7 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 		BinanceOrderID:     &orderIDStr,
 		BalanceBeforeUsdt:  balanceBeforePtr,
 		OpenedAt:           time.Now(),
+		Leverage:           lev,
 	}
 	if instanceID != "" {
 		t.InstanceID = &instanceID
@@ -393,14 +421,19 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	log.Printf("[trade] AÇILIŞ tamamlandı | symbol=%s side=%s trade_id=%d order_id=%s entry=%.8f sl=%.8f tp=%.8f | bakiye_önce=%.2f USDT",
 		symbol, side, t.ID, db.StrVal(t.BinanceOrderID), entryPrice, slPrice, tpPrice, balBefore)
 
-	msg := fmt.Sprintf("🟢 Pozisyon açıldı\n%s %s | Miktar: %s | Giriş: %.8f | SL: %.8f | TP: %.8f",
-		symbol, side, qtyStr, entryPrice, slPrice, tpPrice)
+	msg := fmt.Sprintf("🟢 Pozisyon açıldı\n%s %s | Miktar: %s | Giriş: %.8f | SL: %.8f | TP: %.8f\nAna para: %.2f USDT | Kaldıraç: %dx | Genişlik: %.2f USDT",
+		symbol, side, qtyStr, entryPrice, slPrice, tpPrice, marginUSD, lev, notionalUSD)
 	return b.telegram.Send(ctx, msg)
 }
 
 func (b *Bot) quantity(price float64, info *futures.Symbol) float64 {
-	usd := b.cfg.Trade.PositionSizeUSD
-	qty := usd / price
+	margin := b.cfg.Trade.PositionSizeUSD
+	lev := b.cfg.Trade.Leverage
+	if lev < 1 {
+		lev = 1
+	}
+	notionalUSD := margin * float64(lev)
+	qty := notionalUSD / price
 	return roundToStep(qty, info.MarketLotSizeFilter().StepSize)
 }
 

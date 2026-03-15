@@ -43,19 +43,20 @@ type TradeConfig struct {
 	Symbols           []string // Taranacak çiftler (TRADE_SYMBOLS), sadece USDT pair: BTCUSDT, ETHUSDT...
 	StopLossPercent   float64
 	TakeProfitPercent float64
-	PositionSizeUSD   float64  // Pozisyon büyüklüğü USDT cinsinden
-	MaxOpenTrades     int      // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
-	InstanceID        string   // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname); DB'de kim yazdı görmek için
-	ExecutorPollSec   int      // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
+	PositionSizeUSD   float64 // Marj (kilitleyeceğin USDT) per pozisyon; işlem büyüklüğü = PositionSizeUSD * Leverage
+	Leverage          int     // Kaldıraç (LEVERAGE); 5 ise 50 USDT marj → 250 USDT notional
+	MaxOpenTrades     int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
+	InstanceID        string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname); DB'de kim yazdı görmek için
+	ExecutorPollSec   int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
 }
 
 // StrategyConfig örnek strateji için. Kuralları sonradan .env ile değiştirebilirsin.
 type StrategyConfig struct {
 	Interval30m       string  // "30m"
-	RSIPeriod        int     // 14
-	RSIThresholdLow  float64 // Long için RSI bu değerin altındaysa (örn 10)
-	RSIThresholdHigh float64 // Short için RSI bu değerin üstündeyse (örn 90)
-	MinVolumeUSD     float64 // Hacim en az bu kadar USD (örn 1_000_000)
+	RSIPeriod         int     // 14
+	RSIThresholdLow   float64 // Long için RSI bu değerin altındaysa (örn 10)
+	RSIThresholdHigh  float64 // Short için RSI bu değerin üstündeyse (örn 90)
+	MinVolumeUSD      float64 // Hacim en az bu kadar USD (örn 1_000_000)
 	VolumeRatioVsPrev float64 // Son mumdan en az bu katı (örn 3)
 }
 
@@ -76,12 +77,12 @@ func Load() (*Config, error) {
 		},
 		Trade: tradeConfigFromEnv(),
 		Strategy: StrategyConfig{
-			Interval30m:        env("STRATEGY_INTERVAL", "30m"),
-			RSIPeriod:          envInt("STRATEGY_RSI_PERIOD", 14),
-			RSIThresholdLow:    envFloat("STRATEGY_RSI_LOW", 10),
-			RSIThresholdHigh:   envFloat("STRATEGY_RSI_HIGH", 90),
-			MinVolumeUSD:       envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
-			VolumeRatioVsPrev:  envFloat("STRATEGY_VOLUME_RATIO", 3),
+			Interval30m:       env("STRATEGY_INTERVAL", "30m"),
+			RSIPeriod:         envInt("STRATEGY_RSI_PERIOD", 14),
+			RSIThresholdLow:   envFloat("STRATEGY_RSI_LOW", 10),
+			RSIThresholdHigh:  envFloat("STRATEGY_RSI_HIGH", 90),
+			MinVolumeUSD:      envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
+			VolumeRatioVsPrev: envFloat("STRATEGY_VOLUME_RATIO", 3),
 		},
 	}, nil
 }
@@ -143,6 +144,7 @@ func tradeConfigFromEnv() TradeConfig {
 		StopLossPercent:   envFloat("STOP_LOSS_PERCENT", 2.0),
 		TakeProfitPercent: envFloat("TAKE_PROFIT_PERCENT", 3.0),
 		PositionSizeUSD:   envFloat("POSITION_SIZE_USD", 100.0),
+		Leverage:          envInt("LEVERAGE", 3),
 		MaxOpenTrades:     envInt("MAX_OPEN_TRADES", 5),
 		InstanceID:        os.Getenv("BOT_INSTANCE_ID"),
 		ExecutorPollSec:   envInt("EXECUTOR_POLL_INTERVAL_SEC", 10),

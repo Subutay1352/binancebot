@@ -35,6 +35,7 @@ type Trade struct {
 	RealizedPnl        *float64   `json:"realized_pnl"`
 	CloseReason        *string    `json:"close_reason"`
 	InstanceID         *string    `json:"instance_id"` // Hangi bot instance yazdı (hostname veya BOT_INSTANCE_ID)
+	Leverage           int        `json:"leverage"`    // Kaldıraç (1–125); 0 = eski kayıt
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -42,12 +43,16 @@ type Trade struct {
 // InsertTrade yeni açık pozisyon kaydı ekler, id döner.
 func (s *Store) InsertTrade(ctx context.Context, t *Trade) (int64, error) {
 	log.Printf("[db] INSERT trade | symbol=%s side=%s entry=%.4f qty=%.6f balance_before=%.2f instance=%s", t.Symbol, t.Side, t.EntryPrice, t.Quantity, ptrFloat(t.BalanceBeforeUsdt), strVal(t.InstanceID))
+	lev := t.Leverage
+	if lev < 1 {
+		lev = 1
+	}
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO trades (symbol, side, position_side, entry_price, quantity, stop_loss, take_profit, binance_order_id, balance_before_usdt, opened_at, instance_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO trades (symbol, side, position_side, entry_price, quantity, stop_loss, take_profit, binance_order_id, balance_before_usdt, opened_at, instance_id, leverage)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at
 	`,
-		t.Symbol, t.Side, strVal(t.PositionSide), t.EntryPrice, t.Quantity, t.StopLoss, t.TakeProfit, strVal(t.BinanceOrderID), t.BalanceBeforeUsdt, t.OpenedAt, t.InstanceID,
+		t.Symbol, t.Side, strVal(t.PositionSide), t.EntryPrice, t.Quantity, t.StopLoss, t.TakeProfit, strVal(t.BinanceOrderID), t.BalanceBeforeUsdt, t.OpenedAt, t.InstanceID, lev,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 	if err == nil {
 		log.Printf("[db] INSERT OK | trade_id=%d", t.ID)
@@ -88,7 +93,7 @@ func StrVal(s *string) string { return strVal(s) }
 func (s *Store) OpenTrades(ctx context.Context) ([]Trade, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
 		FROM trades WHERE closed_at IS NULL ORDER BY opened_at DESC
 	`)
 	if err != nil {
@@ -100,7 +105,7 @@ func (s *Store) OpenTrades(ctx context.Context) ([]Trade, error) {
 		var t Trade
 		var posSide, ordID, closeReason string
 		if err := rows.Scan(&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.PositionSide = strPtr(posSide)
@@ -117,11 +122,11 @@ func (s *Store) OpenTradeBySymbol(ctx context.Context, symbol string) (*Trade, e
 	var posSide, ordID, closeReason string
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
 		FROM trades WHERE symbol = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1
 	`, symbol).Scan(
 		&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-		&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.CreatedAt, &t.UpdatedAt,
+		&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -142,7 +147,7 @@ func (s *Store) ListTrades(ctx context.Context, limit int) ([]Trade, error) {
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
 		FROM trades ORDER BY opened_at DESC LIMIT $1
 	`, limit)
 	if err != nil {
@@ -155,7 +160,7 @@ func (s *Store) ListTrades(ctx context.Context, limit int) ([]Trade, error) {
 		var t Trade
 		var posSide, ordID, closeReason string
 		if err := rows.Scan(&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.PositionSide = strPtr(posSide)

@@ -82,5 +82,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS balance_before_usdt DECIMAL(20,8)`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS balance_after_usdt DECIMAL(20,8)`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS instance_id VARCHAR(128)`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT DEFAULT 1`)
 	return nil
 }

@@ -178,6 +178,7 @@
             <th>Giriş fiyat</th>
             <th>Miktar</th>
             <th>USDT</th>
+            <th>Ana para / Kaldıraç / Genişlik</th>
             <th>Anlık fiyat</th>
             <th>Bekleyen PnL</th>
             <th>Stop loss</th>
@@ -202,6 +203,7 @@
             <th>Giriş</th>
             <th>Miktar</th>
             <th>USDT</th>
+            <th>Ana para / Kaldıraç / Genişlik</th>
             <th>SL / TP</th>
             <th>PnL</th>
             <th>Durum</th>
@@ -269,7 +271,8 @@
       if (wrap) wrap.style.display = 'block';
       if (empty) empty.style.display = 'none';
       tbody.innerHTML = open.map(function(t) {
-        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const side = (t.side || '').toUpperCase();
+        const isLong = side === 'LONG' || side === 'BUY';
         const sideClass = isLong ? 'side-long' : 'side-short';
         const sideLabel = isLong ? 'LONG' : 'SHORT';
         const qty = Number(t.quantity) || 0;
@@ -277,12 +280,17 @@
         const usdtVal = qty && entry ? qty * entry : null;
         const upnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl) : null;
         const pnlClass = upnl != null ? (upnl > 0 ? 'pnl-pos' : upnl < 0 ? 'pnl-neg' : '') : '';
+        var marginStr = '-';
+        if (t.margin_usdt != null && t.leverage != null && t.notional_usdt != null) {
+          marginStr = fmtNum(t.margin_usdt) + ' USDT | ' + (t.leverage || 1) + 'x | ' + fmtNum(t.notional_usdt) + ' USDT';
+        }
         return '<tr>' +
           '<td>' + (t.symbol || '-') + '</td>' +
           '<td class="' + sideClass + '">' + sideLabel + '</td>' +
           '<td>' + fmtPrice(t.entry_price) + '</td>' +
           '<td>' + fmtNum(t.quantity) + '</td>' +
           '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
+          '<td>' + marginStr + '</td>' +
           '<td>' + fmtPrice(t.current_price) + '</td>' +
           '<td class="' + pnlClass + '">' + (upnl != null ? fmtNum(upnl) : '-') + '</td>' +
           '<td>' + fmtPrice(t.stop_loss) + '</td>' +
@@ -313,18 +321,26 @@
         const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
         const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
         const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
-        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const side = (t.side || '').toUpperCase();
+        const isLong = side === 'LONG' || side === 'BUY';
         const sideClass = isLong ? 'side-long' : 'side-short';
         const sideLabel = isLong ? 'LONG' : 'SHORT';
         const qty = Number(t.quantity) || 0;
         const entry = Number(t.entry_price) || 0;
         const usdtVal = qty && entry ? qty * entry : null;
+        var lev = t.leverage != null ? Number(t.leverage) : 1;
+        if (lev < 1) lev = 1;
+        var marginStr = '-';
+        if (usdtVal != null && lev) {
+          marginStr = fmtNum(usdtVal / lev) + ' USDT | ' + lev + 'x | ' + fmtNum(usdtVal) + ' USDT';
+        }
         return '<tr>' +
           '<td>' + (t.symbol || '-') + '</td>' +
           '<td class="' + sideClass + '">' + sideLabel + '</td>' +
           '<td>' + fmtPrice(t.entry_price) + '</td>' +
           '<td>' + fmtNum(t.quantity) + '</td>' +
           '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
+          '<td>' + marginStr + '</td>' +
           '<td>' + sl + ' / ' + tp + '</td>' +
           '<td class="' + pnlClass + '">' + pnlStr + '</td>' +
           '<td>' + status + '</td>' +

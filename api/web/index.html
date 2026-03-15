@@ -269,7 +269,8 @@
       if (wrap) wrap.style.display = 'block';
       if (empty) empty.style.display = 'none';
       tbody.innerHTML = open.map(function(t) {
-        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const side = (t.side || '').toUpperCase();
+        const isLong = side === 'LONG' || side === 'BUY';
         const sideClass = isLong ? 'side-long' : 'side-short';
         const sideLabel = isLong ? 'LONG' : 'SHORT';
         const qty = Number(t.quantity) || 0;
@@ -313,7 +314,8 @@
         const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
         const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
         const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
-        const isLong = (t.side || '').toUpperCase() === 'BUY';
+        const side = (t.side || '').toUpperCase();
+        const isLong = side === 'LONG' || side === 'BUY';
         const sideClass = isLong ? 'side-long' : 'side-short';
         const sideLabel = isLong ? 'LONG' : 'SHORT';
         const qty = Number(t.quantity) || 0;

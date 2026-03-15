@@ -58,10 +58,17 @@ func Run(store *db.Store, bnClient *binance.Client) {
 		ctx := c.Request.Context()
 		out := make([]gin.H, 0, len(list))
 		for _, t := range list {
+			notional := t.Quantity * t.EntryPrice
+			lev := t.Leverage
+			if lev < 1 {
+				lev = 1
+			}
+			marginUSD := notional / float64(lev)
 			item := gin.H{
 				"id": t.ID, "symbol": t.Symbol, "side": t.Side, "entry_price": t.EntryPrice,
 				"quantity": t.Quantity, "stop_loss": t.StopLoss, "take_profit": t.TakeProfit,
 				"opened_at": t.OpenedAt,
+				"leverage": lev, "margin_usdt": marginUSD, "notional_usdt": notional,
 			}
 			curPrice, errPrice := bnClient.GetPrice(ctx, t.Symbol)
 			if errPrice == nil {

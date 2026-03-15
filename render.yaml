@@ -28,6 +28,8 @@ services:
         sync: false
       - key: POSITION_SIZE_USD
         sync: false
+      - key: LEVERAGE
+        sync: false
       - key: MAX_OPEN_TRADES
         sync: false
       - key: EXECUTOR_POLL_INTERVAL_SEC
