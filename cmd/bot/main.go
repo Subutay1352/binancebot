@@ -36,6 +36,13 @@ func main() {
 	// Dashboard API aynı process'te (Render'da PORT'ta dinler, UI takip için)
 	go apiserver.Run(store, client)
 
+	if !cfg.BotEnabled {
+		log.Println("[bot] BOT_ENABLED=false → sadece API/dashboard çalışıyor, tarama ve işlem kapalı")
+		<-ctx.Done()
+		log.Println("servis durdu")
+		return
+	}
+
 	strat := strategy.NewExample(client, cfg.Strategy)
 	tg := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 

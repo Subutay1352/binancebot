@@ -10,11 +10,12 @@ import (
 
 // Config uygulama ayarları. .env veya ortam değişkenlerinden okunur.
 type Config struct {
-	Binance  BinanceConfig
-	Postgres PostgresConfig
-	Telegram TelegramConfig
-	Trade    TradeConfig
-	Strategy StrategyConfig
+	BotEnabled bool // BOT_ENABLED: true=tarama+işlem çalışır, false=sadece API/dashboard ayakta (boş servis)
+	Binance    BinanceConfig
+	Postgres   PostgresConfig
+	Telegram   TelegramConfig
+	Trade      TradeConfig
+	Strategy   StrategyConfig
 }
 
 type BinanceConfig struct {
@@ -65,6 +66,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	return &Config{
+		BotEnabled: envBool("BOT_ENABLED", true),
 		Binance: BinanceConfig{
 			APIKey:    os.Getenv("BINANCE_API_KEY"),
 			SecretKey: os.Getenv("BINANCE_SECRET_KEY"),
