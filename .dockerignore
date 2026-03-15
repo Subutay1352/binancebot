@@ -5,7 +5,6 @@
 .github
 *.md
 scripts/
-cmd/
 docs/
 *.bin
 .DS_Store
