@@ -64,6 +64,12 @@ func Run(store *db.Store, bnClient *binance.Client) {
 				lev = 1
 			}
 			marginUSD := notional / float64(lev)
+			if t.MarginUsdt != nil {
+				marginUSD = *t.MarginUsdt
+			}
+			if t.NotionalUsdt != nil {
+				notional = *t.NotionalUsdt
+			}
 			item := gin.H{
 				"id": t.ID, "symbol": t.Symbol, "side": t.Side, "entry_price": t.EntryPrice,
 				"quantity": t.Quantity, "stop_loss": t.StopLoss, "take_profit": t.TakeProfit,

@@ -83,5 +83,24 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS balance_after_usdt DECIMAL(20,8)`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS instance_id VARCHAR(128)`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT DEFAULT 1`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_usdt DECIMAL(20,8)`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE trades ADD COLUMN IF NOT EXISTS notional_usdt DECIMAL(20,8)`)
+
+	// Pozisyon açma hataları (log için ayrı tablo)
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS position_open_errors (
+			id            BIGSERIAL PRIMARY KEY,
+			symbol        VARCHAR(32) NOT NULL,
+			side          VARCHAR(16) NOT NULL,
+			error_message TEXT NOT NULL,
+			instance_id   VARCHAR(128),
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_position_open_errors_symbol ON position_open_errors(symbol);
+		CREATE INDEX IF NOT EXISTS idx_position_open_errors_created_at ON position_open_errors(created_at);
+	`)
+	if err != nil {
+		return err
+	}
 	return nil
 }

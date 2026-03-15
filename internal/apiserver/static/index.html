@@ -271,18 +271,22 @@
       if (wrap) wrap.style.display = 'block';
       if (empty) empty.style.display = 'none';
       tbody.innerHTML = open.map(function(t) {
-        const side = (t.side || '').toUpperCase();
+        const side = String(t.side != null ? t.side : '').trim().toUpperCase();
         const isLong = side === 'LONG' || side === 'BUY';
-        const sideClass = isLong ? 'side-long' : 'side-short';
-        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const isShort = side === 'SHORT' || side === 'SELL';
+        const sideClass = isLong ? 'side-long' : isShort ? 'side-short' : '';
+        const sideLabel = isLong ? 'LONG' : isShort ? 'SHORT' : (side || '-');
         const qty = Number(t.quantity) || 0;
         const entry = Number(t.entry_price) || 0;
         const usdtVal = qty && entry ? qty * entry : null;
         const upnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl) : null;
         const pnlClass = upnl != null ? (upnl > 0 ? 'pnl-pos' : upnl < 0 ? 'pnl-neg' : '') : '';
+        var lev = (t.leverage != null && Number(t.leverage) >= 1) ? Number(t.leverage) : 1;
+        var notional = (t.notional_usdt != null && Number(t.notional_usdt) > 0) ? Number(t.notional_usdt) : usdtVal;
+        var margin = (t.margin_usdt != null && Number(t.margin_usdt) >= 0) ? Number(t.margin_usdt) : (notional != null && lev ? notional / lev : null);
         var marginStr = '-';
-        if (t.margin_usdt != null && t.leverage != null && t.notional_usdt != null) {
-          marginStr = fmtNum(t.margin_usdt) + ' USDT | ' + (t.leverage || 1) + 'x | ' + fmtNum(t.notional_usdt) + ' USDT';
+        if (margin != null && notional != null) {
+          marginStr = fmtNum(margin) + ' USDT | ' + lev + 'x | ' + fmtNum(notional) + ' USDT';
         }
         return '<tr>' +
           '<td>' + (t.symbol || '-') + '</td>' +
@@ -321,10 +325,11 @@
         const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
         const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
         const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
-        const side = (t.side || '').toUpperCase();
+        const side = String(t.side != null ? t.side : '').trim().toUpperCase();
         const isLong = side === 'LONG' || side === 'BUY';
-        const sideClass = isLong ? 'side-long' : 'side-short';
-        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const isShort = side === 'SHORT' || side === 'SELL';
+        const sideClass = isLong ? 'side-long' : isShort ? 'side-short' : '';
+        const sideLabel = isLong ? 'LONG' : isShort ? 'SHORT' : (side || '-');
         const qty = Number(t.quantity) || 0;
         const entry = Number(t.entry_price) || 0;
         const usdtVal = qty && entry ? qty * entry : null;

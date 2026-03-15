@@ -34,8 +34,8 @@ type Bot struct {
 	mu            sync.Mutex
 	activeSymbols map[string]struct{} // Şu an executor'da olan semboller (çift giriş engeli)
 
-	openSlotMu    sync.Mutex // Açılış sayısı race'ini önler (deploy'da 12 açılması gibi)
-	reservedSlots int       // Açılmak üzere rezerve edilmiş slot (openPosition çağrılmış ama henüz DB'ye yazılmamış)
+	openSlotMu    sync.Mutex // Açılış sırasında race önler
+	reservedSlots int       // Şu an openPosition() içinde olan executor sayısı (açılış bitince hemen düşer)
 }
 
 // New Bot oluşturur. checkInterval = scanner'ın tüm sembolleri tarama sıklığı.
@@ -74,6 +74,11 @@ func (b *Bot) Run(ctx context.Context) {
 		}
 		if err := b.client.CloseAllOpenPositions(ctx); err != nil {
 			log.Printf("[bot] testnet temizlik (pozisyon): %v", err)
+		}
+		if err := b.store.DeleteAllTrades(ctx); err != nil {
+			log.Printf("[bot] testnet DB temizlik hatası: %v", err)
+		} else {
+			log.Printf("[bot] testnet: trades tablosu temizlendi")
 		}
 		log.Printf("[bot] testnet temizlik bitti")
 	}
@@ -163,7 +168,7 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 	defer b.setActive(symbol, false)
 	log.Printf("[executor] %s başladı | sinyal=%s", symbol, sig)
 
-	// Limit: DB açık + "açılmak üzere" rezerve slot sayısı max'ı geçmesin (paralel executor race'i önler)
+	// Limit: açık + "açılış yapıyor" (rezerve) sayısı max'ı geçmesin; rezerve openPosition bitince hemen düşer
 	if b.cfg.Trade.MaxOpenTrades > 0 {
 		b.openSlotMu.Lock()
 		openList, err := b.store.OpenTrades(ctx)
@@ -175,20 +180,31 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 		used := len(openList) + b.reservedSlots
 		if used >= b.cfg.Trade.MaxOpenTrades {
 			b.openSlotMu.Unlock()
-			log.Printf("[executor] %s atlandı | max açık (açık=%d + rezerve=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
+			log.Printf("[executor] %s atlandı | max (açık=%d + açılışta=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
 			return
 		}
 		b.reservedSlots++
 		b.openSlotMu.Unlock()
-
-		defer func() {
-			b.openSlotMu.Lock()
-			b.reservedSlots--
-			b.openSlotMu.Unlock()
-		}()
 	}
 
-	if err := b.openPosition(ctx, symbol, sig); err != nil {
+	err := b.openPosition(ctx, symbol, sig)
+	if b.cfg.Trade.MaxOpenTrades > 0 {
+		b.openSlotMu.Lock()
+		b.reservedSlots--
+		b.openSlotMu.Unlock()
+	}
+	if err != nil {
+		side := "SHORT"
+		if sig == strategy.Long {
+			side = "LONG"
+		}
+		var instID *string
+		if b.cfg.Trade.InstanceID != "" {
+			instID = &b.cfg.Trade.InstanceID
+		}
+		if _, dbErr := b.store.InsertPositionOpenError(ctx, symbol, side, err.Error(), instID); dbErr != nil {
+			log.Printf("[executor] %s hata DB'ye yazılamadı: %v", symbol, dbErr)
+		}
 		log.Printf("[executor] %s pozisyon açılamadı: %v", symbol, err)
 		_ = b.telegram.Send(ctx, "⚠️ "+symbol+" açılamadı: "+err.Error())
 		return
@@ -410,6 +426,8 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 		BalanceBeforeUsdt:  balanceBeforePtr,
 		OpenedAt:           time.Now(),
 		Leverage:           lev,
+		MarginUsdt:         &marginUSD,
+		NotionalUsdt:       &notionalUSD,
 	}
 	if instanceID != "" {
 		t.InstanceID = &instanceID

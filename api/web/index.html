@@ -269,10 +269,11 @@
       if (wrap) wrap.style.display = 'block';
       if (empty) empty.style.display = 'none';
       tbody.innerHTML = open.map(function(t) {
-        const side = (t.side || '').toUpperCase();
+        const side = String(t.side != null ? t.side : '').trim().toUpperCase();
         const isLong = side === 'LONG' || side === 'BUY';
-        const sideClass = isLong ? 'side-long' : 'side-short';
-        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const isShort = side === 'SHORT' || side === 'SELL';
+        const sideClass = isLong ? 'side-long' : isShort ? 'side-short' : '';
+        const sideLabel = isLong ? 'LONG' : isShort ? 'SHORT' : (side || '-');
         const qty = Number(t.quantity) || 0;
         const entry = Number(t.entry_price) || 0;
         const usdtVal = qty && entry ? qty * entry : null;
@@ -314,10 +315,11 @@
         const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
         const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
         const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
-        const side = (t.side || '').toUpperCase();
+        const side = String(t.side != null ? t.side : '').trim().toUpperCase();
         const isLong = side === 'LONG' || side === 'BUY';
-        const sideClass = isLong ? 'side-long' : 'side-short';
-        const sideLabel = isLong ? 'LONG' : 'SHORT';
+        const isShort = side === 'SHORT' || side === 'SELL';
+        const sideClass = isLong ? 'side-long' : isShort ? 'side-short' : '';
+        const sideLabel = isLong ? 'LONG' : isShort ? 'SHORT' : (side || '-');
         const qty = Number(t.quantity) || 0;
         const entry = Number(t.entry_price) || 0;
         const usdtVal = qty && entry ? qty * entry : null;

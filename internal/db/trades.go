@@ -34,8 +34,10 @@ type Trade struct {
 	ExitPrice          *float64   `json:"exit_price"`
 	RealizedPnl        *float64   `json:"realized_pnl"`
 	CloseReason        *string    `json:"close_reason"`
-	InstanceID         *string    `json:"instance_id"` // Hangi bot instance yazdı (hostname veya BOT_INSTANCE_ID)
-	Leverage           int        `json:"leverage"`    // Kaldıraç (1–125); 0 = eski kayıt
+	InstanceID         *string    `json:"instance_id"`   // Hangi bot instance yazdı (hostname veya BOT_INSTANCE_ID)
+	Leverage           int        `json:"leverage"`      // Kaldıraç (1–125); 0 = eski kayıt
+	MarginUsdt         *float64   `json:"margin_usdt"`   // Ana para (marj) USDT
+	NotionalUsdt       *float64   `json:"notional_usdt"` // Genişlik (notional) USDT
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -48,11 +50,11 @@ func (s *Store) InsertTrade(ctx context.Context, t *Trade) (int64, error) {
 		lev = 1
 	}
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO trades (symbol, side, position_side, entry_price, quantity, stop_loss, take_profit, binance_order_id, balance_before_usdt, opened_at, instance_id, leverage)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO trades (symbol, side, position_side, entry_price, quantity, stop_loss, take_profit, binance_order_id, balance_before_usdt, opened_at, instance_id, leverage, margin_usdt, notional_usdt)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id, created_at, updated_at
 	`,
-		t.Symbol, t.Side, strVal(t.PositionSide), t.EntryPrice, t.Quantity, t.StopLoss, t.TakeProfit, strVal(t.BinanceOrderID), t.BalanceBeforeUsdt, t.OpenedAt, t.InstanceID, lev,
+		t.Symbol, t.Side, strVal(t.PositionSide), t.EntryPrice, t.Quantity, t.StopLoss, t.TakeProfit, strVal(t.BinanceOrderID), t.BalanceBeforeUsdt, t.OpenedAt, t.InstanceID, lev, t.MarginUsdt, t.NotionalUsdt,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 	if err == nil {
 		log.Printf("[db] INSERT OK | trade_id=%d", t.ID)
@@ -93,7 +95,7 @@ func StrVal(s *string) string { return strVal(s) }
 func (s *Store) OpenTrades(ctx context.Context) ([]Trade, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), margin_usdt, notional_usdt, created_at, updated_at
 		FROM trades WHERE closed_at IS NULL ORDER BY opened_at DESC
 	`)
 	if err != nil {
@@ -105,7 +107,7 @@ func (s *Store) OpenTrades(ctx context.Context) ([]Trade, error) {
 		var t Trade
 		var posSide, ordID, closeReason string
 		if err := rows.Scan(&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.MarginUsdt, &t.NotionalUsdt, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.PositionSide = strPtr(posSide)
@@ -122,11 +124,11 @@ func (s *Store) OpenTradeBySymbol(ctx context.Context, symbol string) (*Trade, e
 	var posSide, ordID, closeReason string
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), margin_usdt, notional_usdt, created_at, updated_at
 		FROM trades WHERE symbol = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1
 	`, symbol).Scan(
 		&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-		&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt,
+		&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.MarginUsdt, &t.NotionalUsdt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -147,7 +149,7 @@ func (s *Store) ListTrades(ctx context.Context, limit int) ([]Trade, error) {
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
-		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), created_at, updated_at
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), margin_usdt, notional_usdt, created_at, updated_at
 		FROM trades ORDER BY opened_at DESC LIMIT $1
 	`, limit)
 	if err != nil {
@@ -160,7 +162,7 @@ func (s *Store) ListTrades(ctx context.Context, limit int) ([]Trade, error) {
 		var t Trade
 		var posSide, ordID, closeReason string
 		if err := rows.Scan(&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
-			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.MarginUsdt, &t.NotionalUsdt, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.PositionSide = strPtr(posSide)
@@ -185,4 +187,10 @@ func (s *Store) TotalRealizedPnl(ctx context.Context) (float64, error) {
 func (s *Store) TradeCounts(ctx context.Context) (open, closed int, err error) {
 	err = s.pool.QueryRow(ctx, `SELECT COUNT(*) FILTER (WHERE closed_at IS NULL), COUNT(*) FILTER (WHERE closed_at IS NOT NULL) FROM trades`).Scan(&open, &closed)
 	return open, closed, err
+}
+
+// DeleteAllTrades trades tablosundaki tüm kayıtları siler (testnet başlangıç temizliği için).
+func (s *Store) DeleteAllTrades(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM trades`)
+	return err
 }
