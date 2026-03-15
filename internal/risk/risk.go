@@ -1,6 +1,7 @@
 package risk
 
-// Prices entry fiyatı ve yüzdelere göre stop loss / take profit fiyatlarını döner (ham; yuvarlama bot'ta tick size ile yapılır).
+// Prices entry fiyatı ve fiyat hareketi yüzdelerine göre stop loss / take profit fiyatlarını döner (ham; yuvarlama bot'ta tick size ile yapılır).
+// stopLossPercent, takeProfitPercent: fiyat hareketi yüzdesi (örn. 2 = %2). Bot tarafında marj bazlı yüzde kaldıraça bölünerek verilir (marj_risk% / leverage).
 // side: "LONG" veya "SHORT"
 func Prices(entryPrice, stopLossPercent, takeProfitPercent float64, side string) (stopLoss, takeProfit float64) {
 	slPct := stopLossPercent / 100

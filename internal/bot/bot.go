@@ -377,7 +377,10 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 		entryPrice = price
 	}
 
-	rawSL, rawTP := risk.Prices(entryPrice, b.cfg.Trade.StopLossPercent, b.cfg.Trade.TakeProfitPercent, side)
+	// SL/TP yüzdeleri marj bazlı: marj_risk% = fiyat_hareket% * kaldıraç → fiyat_hareket% = marj_risk% / kaldıraç
+	slPct := b.cfg.Trade.StopLossPercent / float64(lev)
+	tpPct := b.cfg.Trade.TakeProfitPercent / float64(lev)
+	rawSL, rawTP := risk.Prices(entryPrice, slPct, tpPct, side)
 	tickSize := info.PriceFilter().TickSize
 	slPrice := roundToTick(rawSL, tickSize)
 	tpPrice := roundToTick(rawTP, tickSize)
