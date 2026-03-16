@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"binancebot/config"
 	"binancebot/internal/binance"
 	"binancebot/internal/db"
 
@@ -34,8 +35,8 @@ func logOutboundIP() {
 	}
 }
 
-// Run dashboard API'yi PORT'ta başlatır ve bloke eder. Bot ile aynı process'te çalışacaksa goroutine'de çağır: go apiserver.Run(store, bnClient)
-func Run(store *db.Store, bnClient *binance.Client) {
+// Run dashboard API'yi PORT'ta başlatır ve bloke eder. cfg UI ayarları varsayılanları için kullanılır.
+func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
 	logOutboundIP()
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -118,10 +119,15 @@ func Run(store *db.Store, bnClient *binance.Client) {
 	r.GET("/api/balance", func(c *gin.Context) {
 		bal, avail, err := bnClient.GetUSDTBalanceDetails(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"balance": nil, "available_balance": nil, "error": err.Error()})
+			c.JSON(http.StatusOK, gin.H{"balance": nil, "available_balance": nil, "balance_in_use": nil, "error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"balance": bal, "available_balance": avail, "futures": true})
+		var inUse *float64
+		if bal >= 0 && avail >= 0 && bal >= avail {
+			used := bal - avail
+			inUse = &used
+		}
+		c.JSON(http.StatusOK, gin.H{"balance": bal, "available_balance": avail, "balance_in_use": inUse, "futures": true})
 	})
 	r.GET("/api/my-ip", func(c *gin.Context) {
 		client := &http.Client{Timeout: 5 * time.Second}
@@ -134,6 +140,46 @@ func Run(store *db.Store, bnClient *binance.Client) {
 		body, _ := io.ReadAll(resp.Body)
 		ip := strings.TrimSpace(string(body))
 		c.JSON(http.StatusOK, gin.H{"ip": ip, "hint": "Binance 'Restrict access to trusted IPs' listesine bu IP'yi ekle"})
+	})
+	r.GET("/api/settings", func(c *gin.Context) {
+		ctx := c.Request.Context()
+		overrides, err := store.GetRuntimeConfig(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		base := config.RuntimeConfigFromConfig(cfg)
+		if base == nil {
+			base = make(map[string]string)
+		}
+		out := make([]gin.H, 0, len(db.RuntimeConfigKeys))
+		for _, key := range db.RuntimeConfigKeys {
+			val := overrides[key]
+			if val == "" {
+				val = base[key]
+			}
+			out = append(out, gin.H{"key": key, "value": val})
+		}
+		c.JSON(http.StatusOK, gin.H{"settings": out})
+	})
+	r.PUT("/api/settings", func(c *gin.Context) {
+		var body map[string]string
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "geçersiz JSON: " + err.Error()})
+			return
+		}
+		ctx := c.Request.Context()
+		toSave := make(map[string]string)
+		for _, key := range db.RuntimeConfigKeys {
+			if v, ok := body[key]; ok {
+				toSave[key] = strings.TrimSpace(v)
+			}
+		}
+		if err := store.SaveRuntimeConfig(ctx, toSave); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	r.GET("/api/summary", func(c *gin.Context) {
 		ctx := c.Request.Context()

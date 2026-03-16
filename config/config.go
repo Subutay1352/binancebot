@@ -63,11 +63,6 @@ type StrategyConfig struct {
 	VolumeRatioVsPrev   float64 // Son mumdan en az bu katı
 	VolumeAvgPeriod     int     // Ortalama hacim için son N mum (0=kapalı)
 	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.0)
-	MAPeriod            int     // Trend filtresi MA periyodu (0=kapalı)
-	HigherTFInterval    string  // Çok TF RSI için üst zaman dilimi (örn "1h")
-	HigherTFRSIPeriod   int     // Üst TF RSI periyodu
-	HigherTFRSILongMax  float64 // Long için üst TF RSI bu değerin altında olmalı (örn 50)
-	HigherTFRSIShortMin float64 // Short için üst TF RSI bu değerin üstünde olmalı (örn 50)
 }
 
 // Load .env dosyasını yükler ve Config döner.
@@ -96,11 +91,6 @@ func Load() (*Config, error) {
 			VolumeRatioVsPrev:   envFloat("STRATEGY_VOLUME_RATIO", 3),
 			VolumeAvgPeriod:     envInt("STRATEGY_VOLUME_AVG_PERIOD", 20),
 			VolumeMinRatioToAvg: envFloat("STRATEGY_VOLUME_MIN_RATIO_AVG", 1.0),
-			MAPeriod:            envInt("STRATEGY_MA_PERIOD", 20),
-			HigherTFInterval:    env("STRATEGY_HIGHER_TF_INTERVAL", "1h"),
-			HigherTFRSIPeriod:   envInt("STRATEGY_HIGHER_TF_RSI_PERIOD", 14),
-			HigherTFRSILongMax:  envFloat("STRATEGY_HIGHER_TF_RSI_LONG_MAX", 50),
-			HigherTFRSIShortMin: envFloat("STRATEGY_HIGHER_TF_RSI_SHORT_MIN", 50),
 		},
 	}, nil
 }
@@ -168,6 +158,83 @@ func tradeConfigFromEnv() TradeConfig {
 		MinBalanceShutdown: envFloat("MIN_BALANCE_SHUTDOWN", 0),
 		InstanceID:         os.Getenv("BOT_INSTANCE_ID"),
 		ExecutorPollSec:   envInt("EXECUTOR_POLL_INTERVAL_SEC", 10),
+	}
+}
+
+// ApplyRuntimeOverrides base config üzerine DB'den gelen runtime ayarlarını uygular.
+// Sadece RuntimeConfigKeys ile tanımlı alanlar override edilir; boş string yok sayılır.
+func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
+	if base == nil || overrides == nil {
+		return base
+	}
+	out := *base
+	out.Trade = base.Trade
+	out.Strategy = base.Strategy
+	parseFloat := func(s string) (float64, bool) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		return f, err == nil
+	}
+	parseInt := func(s string) (int, bool) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0, false
+		}
+		i, err := strconv.Atoi(s)
+		return i, err == nil
+	}
+	if v, ok := parseFloat(overrides["STOP_LOSS_PERCENT"]); ok {
+		out.Trade.StopLossPercent = v
+	}
+	if v, ok := parseFloat(overrides["TAKE_PROFIT_PERCENT"]); ok {
+		out.Trade.TakeProfitPercent = v
+	}
+	if s := strings.TrimSpace(overrides["STRATEGY_INTERVAL"]); s != "" {
+		out.Strategy.Interval30m = s
+	}
+	if v, ok := parseInt(overrides["STRATEGY_RSI_PERIOD"]); ok && v > 0 {
+		out.Strategy.RSIPeriod = v
+	}
+	if v, ok := parseFloat(overrides["STRATEGY_RSI_LOW"]); ok {
+		out.Strategy.RSIThresholdLow = v
+	}
+	if v, ok := parseFloat(overrides["STRATEGY_RSI_HIGH"]); ok {
+		out.Strategy.RSIThresholdHigh = v
+	}
+	if v, ok := parseFloat(overrides["STRATEGY_MIN_VOLUME_USD"]); ok {
+		out.Strategy.MinVolumeUSD = v
+	}
+	if v, ok := parseFloat(overrides["STRATEGY_VOLUME_RATIO"]); ok {
+		out.Strategy.VolumeRatioVsPrev = v
+	}
+	if v, ok := parseInt(overrides["STRATEGY_VOLUME_AVG_PERIOD"]); ok {
+		out.Strategy.VolumeAvgPeriod = v
+	}
+	if v, ok := parseFloat(overrides["STRATEGY_VOLUME_MIN_RATIO_AVG"]); ok {
+		out.Strategy.VolumeMinRatioToAvg = v
+	}
+	return &out
+}
+
+// RuntimeConfigFromConfig mevcut config değerlerini runtime key-value map olarak döner (UI varsayılanları için).
+func RuntimeConfigFromConfig(cfg *Config) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	return map[string]string{
+		"STOP_LOSS_PERCENT":               strconv.FormatFloat(cfg.Trade.StopLossPercent, 'f', -1, 64),
+		"TAKE_PROFIT_PERCENT":             strconv.FormatFloat(cfg.Trade.TakeProfitPercent, 'f', -1, 64),
+		"STRATEGY_INTERVAL":               cfg.Strategy.Interval30m,
+		"STRATEGY_RSI_PERIOD":             strconv.Itoa(cfg.Strategy.RSIPeriod),
+		"STRATEGY_RSI_LOW":                strconv.FormatFloat(cfg.Strategy.RSIThresholdLow, 'f', -1, 64),
+		"STRATEGY_RSI_HIGH":               strconv.FormatFloat(cfg.Strategy.RSIThresholdHigh, 'f', -1, 64),
+		"STRATEGY_MIN_VOLUME_USD":         strconv.FormatFloat(cfg.Strategy.MinVolumeUSD, 'f', -1, 64),
+		"STRATEGY_VOLUME_RATIO":           strconv.FormatFloat(cfg.Strategy.VolumeRatioVsPrev, 'f', -1, 64),
+		"STRATEGY_VOLUME_AVG_PERIOD":      strconv.Itoa(cfg.Strategy.VolumeAvgPeriod),
+		"STRATEGY_VOLUME_MIN_RATIO_AVG":   strconv.FormatFloat(cfg.Strategy.VolumeMinRatioToAvg, 'f', -1, 64),
 	}
 }
 

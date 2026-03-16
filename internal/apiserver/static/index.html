@@ -146,6 +146,10 @@
       <div id="availableBalance" class="value neutral">-</div>
     </div>
     <div class="card">
+      <h3>İşlemdeki bakiye (marjda)</h3>
+      <div id="balanceInUse" class="value neutral">-</div>
+    </div>
+    <div class="card">
       <h3>Toplam PnL</h3>
       <div id="totalPnl" class="value neutral">-</div>
     </div>
@@ -173,8 +177,16 @@
 
   <div class="toolbar">
     <button type="button" id="btnRefresh" class="btn btn-primary" onclick="loadAll()">Yenile</button>
+    <button type="button" id="btnSettings" class="btn" style="background:#2f3640;color:#e7e9ea;" onclick="toggleSettings()">Ayarlar</button>
     <span id="lastUpdate" style="color:#8b98a5;font-size:0.85rem;"></span>
-    <span class="hint">· Otomatik yenileme: 10 sn</span>
+    <span class="hint">· Otomatik yenileme: 10 sn · Ayarlar DB'de saklanır, sonraki taramada geçerli olur (deploy gerekmez)</span>
+  </div>
+
+  <div id="settingsSection" class="section" style="display:none;">
+    <div class="section-title">Strateji / risk ayarları (UI'dan değiştir, kaydet)</div>
+    <div id="settingsForm" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.75rem 1.5rem;margin-bottom:1rem;max-width:900px;"></div>
+    <button type="button" id="btnSaveSettings" class="btn btn-primary" onclick="saveSettings()">Kaydet</button>
+    <span id="settingsStatus" style="margin-left:0.5rem;font-size:0.85rem;color:#8b98a5;"></span>
   </div>
 
   <div id="loadError" class="error" style="display:none;"></div>
@@ -270,11 +282,13 @@
       const badge = document.getElementById('openBadge');
       if (badge) badge.textContent = data.open_count != null ? String(data.open_count) : '0';
     }
-    function setBalance(bal, avail) {
+    function setBalance(bal, avail, inUse) {
       var el = document.getElementById('balance');
       if (el) { el.textContent = bal != null ? fmtNum(bal) : '-'; el.className = 'value neutral'; }
       el = document.getElementById('availableBalance');
       if (el) { el.textContent = avail != null ? fmtNum(avail) : '-'; el.className = 'value neutral'; }
+      el = document.getElementById('balanceInUse');
+      if (el) { el.textContent = inUse != null ? fmtNum(inUse) : '-'; el.className = 'value neutral'; }
     }
 
     function renderOpenPositions(trades) {
@@ -412,12 +426,12 @@
       fetch('/api/balance')
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          setBalance(d.balance, d.available_balance);
+          setBalance(d.balance, d.available_balance, d.balance_in_use);
           balanceDone = true;
           tryFinish();
         })
         .catch(function() {
-          setBalance(null, null);
+          setBalance(null, null, null);
           balanceDone = true;
           tryFinish();
         });
@@ -487,6 +501,73 @@
         .catch(function() {
           var el = document.getElementById('serverIp');
           if (el) el.textContent = '-';
+        });
+    }
+
+    var settingsLabels = {
+      'STOP_LOSS_PERCENT': 'Stop loss %',
+      'TAKE_PROFIT_PERCENT': 'Take profit %',
+      'STRATEGY_INTERVAL': 'Mum aralığı (3m, 15m, 30m)',
+      'STRATEGY_RSI_PERIOD': 'RSI periyodu',
+      'STRATEGY_RSI_LOW': 'RSI low (long eşiği)',
+      'STRATEGY_RSI_HIGH': 'RSI high (short eşiği)',
+      'STRATEGY_MIN_VOLUME_USD': 'Min hacim USD',
+      'STRATEGY_VOLUME_RATIO': 'Hacim oranı (önceki mum)',
+      'STRATEGY_VOLUME_AVG_PERIOD': 'Hacim ortalama periyot (0=kapalı)',
+      'STRATEGY_VOLUME_MIN_RATIO_AVG': 'Hacim min oran ort.'
+    };
+    function toggleSettings() {
+      var sec = document.getElementById('settingsSection');
+      if (!sec) return;
+      if (sec.style.display === 'none') {
+        sec.style.display = 'block';
+        loadSettings();
+      } else {
+        sec.style.display = 'none';
+      }
+    }
+    function loadSettings() {
+      fetch('/api/settings')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var list = d.settings || [];
+          var form = document.getElementById('settingsForm');
+          if (!form) return;
+          form.innerHTML = list.map(function(item) {
+            var key = item.key || '';
+            var label = settingsLabels[key] || key;
+            var val = (item.value != null && item.value !== undefined) ? String(item.value) : '';
+            return '<div><label style="display:block;font-size:0.8rem;color:#8b98a5;margin-bottom:0.2rem;">' + label + '</label><input type="text" id="set_' + key + '" value="' + val.replace(/"/g, '&quot;') + '" style="width:100%;padding:0.4rem;border-radius:6px;border:1px solid #2f3640;background:#161b22;color:#e7e9ea;box-sizing:border-box;"></div>';
+          }).join('');
+        })
+        .catch(function() {
+          var form = document.getElementById('settingsForm');
+          if (form) form.innerHTML = '<span class="error">Ayarlar yüklenemedi.</span>';
+        });
+    }
+    function saveSettings() {
+      var btn = document.getElementById('btnSaveSettings');
+      var status = document.getElementById('settingsStatus');
+      if (btn) btn.disabled = true;
+      if (status) status.textContent = 'Kaydediliyor...';
+      var body = {};
+      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
+      keys.forEach(function(key) {
+        var el = document.getElementById('set_' + key);
+        if (el) body[key] = el.value.trim();
+      });
+      fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function(r) {
+          if (!r.ok) throw new Error(r.status);
+          return r.json();
+        })
+        .then(function() {
+          if (status) status.textContent = 'Kaydedildi. Sonraki taramada geçerli.';
+          if (btn) btn.disabled = false;
+        })
+        .catch(function(e) {
+          if (status) status.textContent = 'Hata: ' + (e.message || 'kaydedilemedi');
+          if (btn) btn.disabled = false;
         });
     }
 

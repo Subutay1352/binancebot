@@ -32,6 +32,9 @@ type Bot struct {
 	telegram *telegram.Notifier
 	interval time.Duration
 
+	effectiveCfgMu sync.RWMutex
+	effectiveCfg   *config.Config // env + DB runtime ayarları; her tarama turunda yenilenir
+
 	mu            sync.Mutex
 	activeSymbols map[string]struct{} // Şu an executor'da olan semboller (çift giriş engeli)
 
@@ -47,7 +50,7 @@ func New(cfg *config.Config, store *db.Store, client *binance.Client, strat stra
 	if checkInterval <= 0 {
 		checkInterval = 2 * time.Minute
 	}
-	return &Bot{
+	b := &Bot{
 		cfg:           cfg,
 		store:         store,
 		client:        client,
@@ -56,10 +59,37 @@ func New(cfg *config.Config, store *db.Store, client *binance.Client, strat stra
 		interval:      checkInterval,
 		activeSymbols: make(map[string]struct{}),
 	}
+	b.effectiveCfg = config.ApplyRuntimeOverrides(cfg, nil) // başta env değerleri
+	return b
+}
+
+// refreshEffectiveConfig DB'deki runtime ayarlarını yükleyip effectiveCfg ve stratejiyi günceller.
+func (b *Bot) refreshEffectiveConfig(ctx context.Context) {
+	overrides, err := b.store.GetRuntimeConfig(ctx)
+	if err != nil {
+		return
+	}
+	newCfg := config.ApplyRuntimeOverrides(b.cfg, overrides)
+	b.effectiveCfgMu.Lock()
+	b.effectiveCfg = newCfg
+	b.effectiveCfgMu.Unlock()
+	if ex, ok := b.strat.(*strategy.Example); ok {
+		ex.SetConfig(newCfg.Strategy)
+	}
+}
+
+func (b *Bot) getEffective() *config.Config {
+	b.effectiveCfgMu.RLock()
+	defer b.effectiveCfgMu.RUnlock()
+	if b.effectiveCfg != nil {
+		return b.effectiveCfg
+	}
+	return b.cfg
 }
 
 // Run scanner döngüsünü başlatır. ctx iptal edilene kadar çalışır.
 func (b *Bot) Run(ctx context.Context) {
+	b.refreshEffectiveConfig(ctx)
 	symbols := b.cfg.Trade.Symbols
 	if len(symbols) == 0 {
 		symbols = []string{b.cfg.Trade.Symbol}
@@ -165,6 +195,7 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	runScan := func() {
+		b.refreshEffectiveConfig(ctx)
 		if b.cfg.Trade.MinBalanceShutdown > 0 {
 			bal, _, _ := b.client.GetUSDTBalanceDetails(ctx)
 			if bal < b.cfg.Trade.MinBalanceShutdown {
@@ -594,8 +625,8 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	}
 
 	// SL/TP yüzdeleri marj bazlı: marj_risk% = fiyat_hareket% * kaldıraç → fiyat_hareket% = marj_risk% / kaldıraç
-	slPct := b.cfg.Trade.StopLossPercent / float64(lev)
-	tpPct := b.cfg.Trade.TakeProfitPercent / float64(lev)
+	slPct := b.getEffective().Trade.StopLossPercent / float64(lev)
+	tpPct := b.getEffective().Trade.TakeProfitPercent / float64(lev)
 	rawSL, rawTP := risk.Prices(entryPrice, slPct, tpPct, side)
 	tickSize := info.PriceFilter().TickSize
 	slPrice := roundToTick(rawSL, tickSize)

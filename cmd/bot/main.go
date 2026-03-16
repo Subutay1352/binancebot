@@ -34,7 +34,7 @@ func main() {
 	client := binance.NewClient(cfg)
 
 	// Dashboard API aynı process'te (Render'da PORT'ta dinler, UI takip için)
-	go apiserver.Run(store, client)
+	go apiserver.Run(store, client, cfg)
 
 	if !cfg.BotEnabled {
 		log.Println("[bot] BOT_ENABLED=false → sadece API/dashboard çalışıyor, tarama ve işlem kapalı")

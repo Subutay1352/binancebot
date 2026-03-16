@@ -22,13 +22,14 @@ func NewExample(client *binance.Client, cfg config.StrategyConfig) *Example {
 	return &Example{client: client, cfg: cfg}
 }
 
-// Decide Wilder RSI, hacim (ortalama dahil), MA trend ve üst TF RSI ile sinyal verir.
+// SetConfig runtime’da strateji ayarlarını günceller (UI’dan değişince bot bunu çağırır).
+func (e *Example) SetConfig(cfg config.StrategyConfig) {
+	e.cfg = cfg
+}
+
+// Decide Wilder RSI + hacim (ortalama dahil) ile sinyal verir.
 func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
-	// Ana TF (30m) – yeterli mum: RSI + MA + hacim ortalaması
 	needCandles := e.cfg.RSIPeriod + 25
-	if e.cfg.MAPeriod > 0 && e.cfg.MAPeriod > needCandles {
-		needCandles = e.cfg.MAPeriod + 5
-	}
 	if e.cfg.VolumeAvgPeriod > 0 && e.cfg.VolumeAvgPeriod > needCandles {
 		needCandles = e.cfg.VolumeAvgPeriod + 5
 	}
@@ -40,13 +41,11 @@ func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 	closes := klineCloses(klines)
 	quoteVolumes := klineQuoteVolumes(klines)
 
-	// 1) Wilder RSI (son değer)
 	rsiVal := rsiWilder(closes, e.cfg.RSIPeriod)
 	if math.IsNaN(rsiVal) {
 		return Hold, nil
 	}
 
-	// 2) Hacim: mevcut kurallar + ortalama hacim filtresi
 	n := len(quoteVolumes)
 	currentVol := quoteVolumes[n-1]
 	prevVol := 0.0
@@ -61,38 +60,11 @@ func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 		}
 	}
 
-	// 3) Trend: Long sadece fiyat MA üstünde, Short sadece MA altında
-	priceAboveMA := true
-	priceBelowMA := true
-	if e.cfg.MAPeriod > 0 && len(closes) >= e.cfg.MAPeriod {
-		ma := sma(closes, len(closes)-1, e.cfg.MAPeriod)
-		if !math.IsNaN(ma) {
-			lastClose := closes[len(closes)-1]
-			priceAboveMA = lastClose > ma
-			priceBelowMA = lastClose < ma
-		}
-	}
-
-	// 4) Üst zaman dilimi RSI (örn. 1h)
-	higherTFOKLong := true
-	higherTFOKShort := true
-	if e.cfg.HigherTFInterval != "" && e.cfg.HigherTFRSIPeriod > 0 {
-		htfKlines, errH := e.client.Klines(ctx, symbol, e.cfg.HigherTFInterval, e.cfg.HigherTFRSIPeriod+15)
-		if errH == nil && len(htfKlines) >= e.cfg.HigherTFRSIPeriod+2 {
-			htfCloses := klineCloses(htfKlines)
-			htfRSI := rsiWilder(htfCloses, e.cfg.HigherTFRSIPeriod)
-			if !math.IsNaN(htfRSI) {
-				higherTFOKLong = htfRSI < e.cfg.HigherTFRSILongMax
-				higherTFOKShort = htfRSI > e.cfg.HigherTFRSIShortMin
-			}
-		}
-	}
-
-	// Klasik: RSI LOW altına düşünce LONG (oversold al), RSI HIGH üstüne çıkınca SHORT (overbought sat)
-	if rsiVal < e.cfg.RSIThresholdLow && volumeOK && priceAboveMA && higherTFOKLong {
+	// Klasik: RSI LOW altına düşünce LONG, RSI HIGH üstüne çıkınca SHORT
+	if rsiVal < e.cfg.RSIThresholdLow && volumeOK {
 		return Long, nil
 	}
-	if rsiVal > e.cfg.RSIThresholdHigh && volumeOK && priceBelowMA && higherTFOKShort {
+	if rsiVal > e.cfg.RSIThresholdHigh && volumeOK {
 		return Short, nil
 	}
 	return Hold, nil
@@ -166,16 +138,4 @@ func avgVolume(vols []float64, endIdx, period int) float64 {
 		sum += vols[i]
 	}
 	return sum / float64(endIdx-start+1)
-}
-
-func sma(closes []float64, endIdx, period int) float64 {
-	start := endIdx - period + 1
-	if start < 0 {
-		return math.NaN()
-	}
-	sum := 0.0
-	for i := start; i <= endIdx; i++ {
-		sum += closes[i]
-	}
-	return sum / float64(period)
 }

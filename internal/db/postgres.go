@@ -102,5 +102,11 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return nil
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS runtime_config (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		);
+	`)
+	return err
 }
