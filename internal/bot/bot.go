@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -58,7 +59,6 @@ func New(cfg *config.Config, store *db.Store, client *binance.Client, strat stra
 }
 
 // Run scanner döngüsünü başlatır. ctx iptal edilene kadar çalışır.
-// Her tick'te tüm sembolleri tarar; koşul sağlayan ve henüz pozisyonu olmayan semboller için executor goroutine spawn eder.
 func (b *Bot) Run(ctx context.Context) {
 	symbols := b.cfg.Trade.Symbols
 	if len(symbols) == 0 {
@@ -69,6 +69,11 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 	bal, avail, _ := b.client.GetUSDTBalanceDetails(ctx)
 	log.Printf("[bot] başlatıldı | instance=%s | bakiye=%.2f USDT (kullanılabilir=%.2f) | tarama aralığı=%v | semboller=%v | max_açık_pozisyon=%d", b.cfg.Trade.InstanceID, bal, avail, b.interval, symbols, b.cfg.Trade.MaxOpenTrades)
+
+	if b.cfg.Trade.MinBalanceShutdown > 0 && bal < b.cfg.Trade.MinBalanceShutdown {
+		log.Printf("[bot] Bakiye %.2f USDT < %.2f USDT (MIN_BALANCE_SHUTDOWN), shutdown.", bal, b.cfg.Trade.MinBalanceShutdown)
+		os.Exit(0)
+	}
 
 	if b.cfg.Binance.Testnet {
 		log.Printf("[bot] testnet: açık algo emirleri ve pozisyonlar temizleniyor...")
@@ -86,7 +91,53 @@ func (b *Bot) Run(ctx context.Context) {
 		log.Printf("[bot] testnet temizlik bitti")
 	}
 
-	// Başlangıçta DB ile Binance'ı senkronize et: DB'de açık görünüp borsada kapalı olanları hemen kapat
+	// Başlangıçta Binance'daki tüm açık pozisyonları al; DB'de kaydı olmayanları ekle (manuel veya başka instance açmış olabilir)
+	binancePositions, errBinance := b.client.GetOpenPositions(ctx)
+	if errBinance == nil && len(binancePositions) > 0 {
+		openList, _ := b.store.OpenTrades(ctx)
+		dbSymbols := make(map[string]struct{})
+		for i := range openList {
+			dbSymbols[openList[i].Symbol] = struct{}{}
+		}
+		for _, p := range binancePositions {
+			symbol := p.Symbol
+			if _, inDB := dbSymbols[symbol]; inDB {
+				continue
+			}
+			amt := parseFloat(p.PositionAmt)
+			if amt == 0 {
+				continue
+			}
+			side := "LONG"
+			qty := amt
+			if amt < 0 {
+				side = "SHORT"
+				qty = -amt
+			}
+			entryPrice := parseFloat(p.EntryPrice)
+			instanceID := b.cfg.Trade.InstanceID
+			t := &db.Trade{
+				Symbol:     symbol,
+				Side:       side,
+				EntryPrice: entryPrice,
+				Quantity:   qty,
+				OpenedAt:   time.Now(),
+				Leverage:   1,
+			}
+			if instanceID != "" {
+				t.InstanceID = &instanceID
+			}
+			if id, err := b.store.InsertTrade(ctx, t); err != nil {
+				log.Printf("[bot] Binance→DB ekleme hatası %s: %v", symbol, err)
+			} else {
+				t.ID = id
+				log.Printf("[bot] Borsada açık, DB'de yoktu: %s %s eklendi (trade_id=%d)", symbol, side, id)
+				dbSymbols[symbol] = struct{}{}
+			}
+		}
+	}
+
+	// DB'de açık görünüp borsada kapalı olanları hemen kapat; gerçekten açık olanlar için executor başlat
 	openList, errStart := b.store.OpenTrades(ctx)
 	if errStart == nil && len(openList) > 0 {
 		log.Printf("[bot] DB'de %d açık pozisyon var, Binance ile senkronize ediliyor...", len(openList))
@@ -114,12 +165,22 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	runScan := func() {
+		if b.cfg.Trade.MinBalanceShutdown > 0 {
+			bal, _, _ := b.client.GetUSDTBalanceDetails(ctx)
+			if bal < b.cfg.Trade.MinBalanceShutdown {
+				log.Printf("[bot] Bakiye %.2f USDT < %.2f USDT (MIN_BALANCE_SHUTDOWN), shutdown.", bal, b.cfg.Trade.MinBalanceShutdown)
+				os.Exit(0)
+			}
+		}
 		if b.isRateLimited() {
 			log.Printf("[scanner] tur atlandı (Binance rate limit, ban süresi dolana kadar bekleniyor)")
 			return
 		}
-		log.Printf("[scanner] tur başladı | sembol sayısı=%d (sırayla)", len(symbols))
-		for _, symbol := range symbols {
+		scanOrder := make([]string, len(symbols))
+		copy(scanOrder, symbols)
+		rand.Shuffle(len(scanOrder), func(i, j int) { scanOrder[i], scanOrder[j] = scanOrder[j], scanOrder[i] })
+		log.Printf("[scanner] tur başladı | sembol sayısı=%d (rastgele sıra)", len(scanOrder))
+		for _, symbol := range scanOrder {
 			if b.isRateLimited() {
 				log.Printf("[scanner] rate limit, tur yarıda kesildi")
 				break
@@ -192,6 +253,15 @@ func (b *Bot) scanOne(ctx context.Context, symbol string) error {
 		}
 		if len(openList) >= b.cfg.Trade.MaxOpenTrades {
 			log.Printf("[scanner] %s sinyal=%s ATLANDI | max açık pozisyon (açık=%d, max=%d)", symbol, sig, len(openList), b.cfg.Trade.MaxOpenTrades)
+			return nil
+		}
+	}
+
+	// Son 12 saatte 2'den fazla zarar varsa yeni işlem açma
+	if b.cfg.Trade.MaxLossesIn12h > 0 {
+		lossCount, err := b.store.LossCountLast12h(ctx)
+		if err == nil && lossCount > b.cfg.Trade.MaxLossesIn12h {
+			log.Printf("[scanner] %s sinyal=%s ATLANDI | son 12 saatte %d zarar (max=%d)", symbol, sig, lossCount, b.cfg.Trade.MaxLossesIn12h)
 			return nil
 		}
 	}

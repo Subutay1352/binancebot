@@ -47,23 +47,25 @@ type TradeConfig struct {
 	PositionSizeUSD   float64 // Marj (kilitleyeceğin USDT) per pozisyon; işlem büyüklüğü = PositionSizeUSD * Leverage
 	Leverage          int     // Kaldıraç (LEVERAGE); 5 ise 50 USDT marj → 250 USDT notional
 	MaxOpenTrades     int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
+	MaxLossesIn12h    int     // Son 12 saatte bu sayıdan fazla zarar varsa yeni işlem açılmaz (0=kapalı)
+	MinBalanceShutdown float64 // Futures bakiyesi bu değerin altına inerse bot kapanır, yeniden başlatılsa da tekrar kapanır (0=kapalı)
 	InstanceID        string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname); DB'de kim yazdı görmek için
 	ExecutorPollSec   int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
 }
 
 // StrategyConfig örnek strateji için. Kuralları sonradan .env ile değiştirebilirsin.
 type StrategyConfig struct {
-	Interval30m       string  // "30m"
-	RSIPeriod         int     // 14
-	RSIThresholdLow   float64 // Long için RSI bu değerin altındaysa (örn 10)
-	RSIThresholdHigh  float64 // Short için RSI bu değerin üstündeyse (örn 90)
-	MinVolumeUSD      float64 // Hacim en az bu kadar USD
-	VolumeRatioVsPrev float64 // Son mumdan en az bu katı
-	VolumeAvgPeriod   int     // Ortalama hacim için son N mum (0=kapalı)
+	Interval30m         string  // "30m"
+	RSIPeriod           int     // 14
+	RSIThresholdLow     float64 // Long için RSI bu değerin altındaysa (örn 10)
+	RSIThresholdHigh    float64 // Short için RSI bu değerin üstündeyse (örn 90)
+	MinVolumeUSD        float64 // Hacim en az bu kadar USD
+	VolumeRatioVsPrev   float64 // Son mumdan en az bu katı
+	VolumeAvgPeriod     int     // Ortalama hacim için son N mum (0=kapalı)
 	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.0)
-	MAPeriod          int     // Trend filtresi MA periyodu (0=kapalı)
-	HigherTFInterval  string  // Çok TF RSI için üst zaman dilimi (örn "1h")
-	HigherTFRSIPeriod int     // Üst TF RSI periyodu
+	MAPeriod            int     // Trend filtresi MA periyodu (0=kapalı)
+	HigherTFInterval    string  // Çok TF RSI için üst zaman dilimi (örn "1h")
+	HigherTFRSIPeriod   int     // Üst TF RSI periyodu
 	HigherTFRSILongMax  float64 // Long için üst TF RSI bu değerin altında olmalı (örn 50)
 	HigherTFRSIShortMin float64 // Short için üst TF RSI bu değerin üstünde olmalı (örn 50)
 }
@@ -162,7 +164,9 @@ func tradeConfigFromEnv() TradeConfig {
 		PositionSizeUSD:   envFloat("POSITION_SIZE_USD", 100.0),
 		Leverage:          envInt("LEVERAGE", 3),
 		MaxOpenTrades:     envInt("MAX_OPEN_TRADES", 5),
-		InstanceID:        os.Getenv("BOT_INSTANCE_ID"),
+		MaxLossesIn12h:     envInt("MAX_LOSSES_IN_12H", 2),
+		MinBalanceShutdown: envFloat("MIN_BALANCE_SHUTDOWN", 0),
+		InstanceID:         os.Getenv("BOT_INSTANCE_ID"),
 		ExecutorPollSec:   envInt("EXECUTOR_POLL_INTERVAL_SEC", 10),
 	}
 }

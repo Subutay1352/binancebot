@@ -88,6 +88,7 @@ func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 		}
 	}
 
+	// Klasik: RSI LOW altına düşünce LONG (oversold al), RSI HIGH üstüne çıkınca SHORT (overbought sat)
 	if rsiVal < e.cfg.RSIThresholdLow && volumeOK && priceAboveMA && higherTFOKLong {
 		return Long, nil
 	}

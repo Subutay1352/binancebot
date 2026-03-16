@@ -210,6 +210,13 @@ func (s *Store) TradeCounts(ctx context.Context) (open, closed int, err error) {
 	return open, closed, err
 }
 
+// LossCountLast12h son 12 saatte zararla (realized_pnl < 0) kapanan işlem sayısı.
+func (s *Store) LossCountLast12h(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM trades WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '12 hours' AND realized_pnl < 0`).Scan(&n)
+	return n, err
+}
+
 // DeleteAllTrades trades tablosundaki tüm kayıtları siler (testnet başlangıç temizliği için).
 func (s *Store) DeleteAllTrades(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM trades`)
