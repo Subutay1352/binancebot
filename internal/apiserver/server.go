@@ -291,6 +291,20 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config, tg *tele
 				"quantity": o.Quantity, "opened_at": o.OpenedAt,
 			})
 		}
+		const winrateLastN = 50
+		closedList, _ := store.ListClosedTrades(ctx, winrateLastN)
+		winrateWins := 0
+		for _, t := range closedList {
+			if t.RealizedPnl != nil && *t.RealizedPnl > 0 {
+				winrateWins++
+			}
+		}
+		winrateTotal := len(closedList)
+		var winratePct *float64
+		if winrateTotal > 0 {
+			pct := float64(winrateWins) / float64(winrateTotal) * 100
+			winratePct = &pct
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"total_pnl":      total,
 			"pnl_last_24h":   pnl24h,
@@ -298,6 +312,9 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config, tg *tele
 			"open_positions": openPositions,
 			"open_count":     openCount,
 			"closed_count":   closedCount,
+			"winrate_pct":    winratePct,
+			"winrate_wins":   winrateWins,
+			"winrate_total":  winrateTotal,
 		})
 	})
 

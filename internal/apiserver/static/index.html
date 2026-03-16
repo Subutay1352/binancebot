@@ -170,6 +170,10 @@
       <div id="closedCount" class="value neutral">-</div>
     </div>
     <div class="card">
+      <h3>Winrate (son 50)</h3>
+      <div id="winrate" class="value neutral">-</div>
+    </div>
+    <div class="card">
       <h3>Sunucu IP (Binance)</h3>
       <div id="serverIp" class="value neutral" style="font-size:0.95rem;">-</div>
     </div>
@@ -282,6 +286,19 @@
       document.getElementById('closedCount').textContent = data.closed_count != null ? String(data.closed_count) : '-';
       const badge = document.getElementById('openBadge');
       if (badge) badge.textContent = data.open_count != null ? String(data.open_count) : '0';
+      var winrateEl = document.getElementById('winrate');
+      if (winrateEl) {
+        var winrateTotal = data.winrate_total != null ? Number(data.winrate_total) : 0;
+        var winrateWins = data.winrate_wins != null ? Number(data.winrate_wins) : 0;
+        var winratePct = data.winrate_pct != null ? Number(data.winrate_pct) : null;
+        if (winrateTotal === 0) {
+          winrateEl.textContent = '-';
+          winrateEl.className = 'value neutral';
+        } else {
+          winrateEl.textContent = (winratePct != null ? winratePct.toFixed(1) + '%' : '-') + ' (' + winrateWins + '/' + winrateTotal + ')';
+          winrateEl.className = 'value ' + (winratePct >= 50 ? 'positive' : winratePct < 50 && winrateTotal > 0 ? 'negative' : 'neutral');
+        }
+      }
     }
     function setBalance(bal, avail, inUse) {
       var el = document.getElementById('balance');
