@@ -142,6 +142,36 @@ func (s *Store) OpenTradeBySymbol(ctx context.Context, symbol string) (*Trade, e
 	return &t, nil
 }
 
+// ListClosedTrades son N tamamlanmış (kapalı) işlemi döner.
+func (s *Store) ListClosedTrades(ctx context.Context, limit int) ([]Trade, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, symbol, side, COALESCE(position_side, ''), entry_price, quantity, stop_loss, take_profit, COALESCE(binance_order_id, ''), balance_before_usdt, balance_after_usdt, opened_at,
+		       closed_at, exit_price, realized_pnl, COALESCE(close_reason, ''), COALESCE(leverage, 1), margin_usdt, notional_usdt, created_at, updated_at
+		FROM trades WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Trade
+	for rows.Next() {
+		var t Trade
+		var posSide, ordID, closeReason string
+		if err := rows.Scan(&t.ID, &t.Symbol, &t.Side, &posSide, &t.EntryPrice, &t.Quantity, &t.StopLoss, &t.TakeProfit,
+			&ordID, &t.BalanceBeforeUsdt, &t.BalanceAfterUsdt, &t.OpenedAt, &t.ClosedAt, &t.ExitPrice, &t.RealizedPnl, &closeReason, &t.Leverage, &t.MarginUsdt, &t.NotionalUsdt, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		t.PositionSide = strPtr(posSide)
+		t.BinanceOrderID = strPtr(ordID)
+		t.CloseReason = strPtr(closeReason)
+		list = append(list, t)
+	}
+	return list, rows.Err()
+}
+
 // ListTrades son N işlemi döner (açık + kapalı).
 func (s *Store) ListTrades(ctx context.Context, limit int) ([]Trade, error) {
 	if limit <= 0 {

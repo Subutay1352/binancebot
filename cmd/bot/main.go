@@ -32,9 +32,10 @@ func main() {
 	defer store.Close()
 
 	client := binance.NewClient(cfg)
+	tg := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 
-	// Dashboard API aynı process'te (Render'da PORT'ta dinler, UI takip için)
-	go apiserver.Run(store, client, cfg)
+	// Dashboard API aynı process'te (Render'da PORT'ta dinler, UI takip için); manuel kapatmada Telegram ile sync
+	go apiserver.Run(store, client, cfg, tg)
 
 	if !cfg.BotEnabled {
 		log.Println("[bot] BOT_ENABLED=false → sadece API/dashboard çalışıyor, tarama ve işlem kapalı")
@@ -44,8 +45,6 @@ func main() {
 	}
 
 	strat := strategy.NewExample(client, cfg.Strategy)
-	tg := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
-
 	b := bot.New(cfg, store, client, strat, tg, 2*time.Minute)
 	log.Println("bot başladı, Ctrl+C ile durdur")
 	b.Run(ctx)

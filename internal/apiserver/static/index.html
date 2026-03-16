@@ -166,7 +166,7 @@
       <div id="openCount" class="value neutral">-</div>
     </div>
     <div class="card">
-      <h3>Kapalı işlem</h3>
+      <h3>Tamamlanan işlem</h3>
       <div id="closedCount" class="value neutral">-</div>
     </div>
     <div class="card">
@@ -204,7 +204,7 @@
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>Anlık fiyat</th>
             <th>Bekleyen PnL</th>
-            <th>PnL %</th>
+            <th>PnL % (marj)</th>
             <th>Stop loss</th>
             <th>Take profit</th>
             <th>Açılış</th>
@@ -230,7 +230,7 @@
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>SL / TP</th>
             <th>PnL</th>
-            <th>PnL %</th>
+            <th>PnL % (marj)</th>
             <th>Durum</th>
             <th>Açılış</th>
             <th>Kapanış</th>
@@ -365,7 +365,7 @@
         const pnlVal = t.realized_pnl != null ? Number(t.realized_pnl) : null;
         const pnlStr = pnlVal != null ? fmtNum(pnlVal) : '-';
         const pnlClass = pnlVal != null ? (pnlVal > 0 ? 'pnl-pos' : pnlVal < 0 ? 'pnl-neg' : '') : '';
-        const status = t.closed_at ? '<span class="status-closed">Kapalı</span>' : '<span class="status-open">Açık</span>';
+        const status = t.closed_at ? '<span class="status-closed">Tamamlanan</span>' : '<span class="status-open">Açık</span>';
         const side = String(t.side != null ? t.side : '').trim().toUpperCase();
         const isLong = side === 'LONG' || side === 'BUY';
         const isShort = side === 'SHORT' || side === 'SELL';
@@ -512,9 +512,9 @@
           tryFinish();
         });
 
-      fetch('/api/trades?limit=50')
+      fetch('/api/closed-trades?limit=50')
         .then(function(r) {
-          if (!r.ok) throw new Error('İşlemler alınamadı: ' + r.status);
+          if (!r.ok) throw new Error('Tamamlanan işlemler alınamadı: ' + r.status);
           return r.json();
         })
         .then(function(list) {

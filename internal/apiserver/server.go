@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	_ "embed"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"binancebot/config"
 	"binancebot/internal/binance"
 	"binancebot/internal/db"
+	"binancebot/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,8 +37,8 @@ func logOutboundIP() {
 	}
 }
 
-// Run dashboard API'yi PORT'ta başlatır ve bloke eder. cfg UI ayarları varsayılanları için kullanılır.
-func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
+// Run dashboard API'yi PORT'ta başlatır ve bloke eder. tg nil olabilir; manuel kapatmada Telegram bildirimi tg üzerinden gider.
+func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config, tg *telegram.Notifier) {
 	logOutboundIP()
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -46,6 +48,18 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
 	r.GET("/api/trades", func(c *gin.Context) {
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 		list, err := store.ListTrades(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if list == nil {
+			list = []db.Trade{}
+		}
+		c.JSON(http.StatusOK, list)
+	})
+	r.GET("/api/closed-trades", func(c *gin.Context) {
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+		list, err := store.ListClosedTrades(c.Request.Context(), limit)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -126,6 +140,10 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
 		if err := store.CloseTrade(ctx, trade.ID, exitPrice, realizedPnl, &balanceAfter, "MANUAL"); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "kayıt güncellenemedi: " + err.Error()})
 			return
+		}
+		if tg != nil {
+			msg := fmt.Sprintf("🔴 Pozisyon kapandı (manuel)\n%s %s\nÇıkış: %.8f | PnL: %.4f | Bakiye: %.4f USDT", symbol, trade.Side, exitPrice, realizedPnl, balanceAfter)
+			_ = tg.Send(ctx, msg)
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "symbol": symbol, "exit_price": exitPrice, "realized_pnl": realizedPnl})
 	})
