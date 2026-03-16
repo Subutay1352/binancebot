@@ -266,6 +266,19 @@ func (b *Bot) scanOne(ctx context.Context, symbol string) error {
 		return nil
 	}
 
+	// 24s hacim filtresi: sadece yeterli likidite olan semboller
+	if minVol := b.getEffective().Trade.Min24hVolumeUSD; minVol > 0 {
+		vol24h, errVol := b.client.Get24hQuoteVolumeUSD(ctx, symbol)
+		if errVol != nil {
+			log.Printf("[scanner] %s 24h hacim alınamadı (atlanıyor): %v", symbol, errVol)
+			return nil
+		}
+		if vol24h < minVol {
+			log.Printf("[scanner] %s atlandı (24h hacim %.0f < %.0f USDT)", symbol, vol24h, minVol)
+			return nil
+		}
+	}
+
 	sig, err := b.strat.Decide(ctx, symbol)
 	if err != nil {
 		log.Printf("[scanner] %s strateji hata: %v", symbol, err)
@@ -514,42 +527,50 @@ func (b *Bot) checkPositionClosed(ctx context.Context, t *db.Trade, lookback tim
 	if lookback > 0 {
 		since = time.Now().Add(-lookback)
 	}
-	// Gerçek kapanış fill fiyatı (userTrades)
+	// Gerçek kapanış fill fiyatı (userTrades; testnet'te bazen boş)
 	exitPrice, _ := b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, since)
-	// Realized PnL her zaman Income'dan (komisyon dahil, borsa ile aynı)
 	var realizedPnl float64
-	var errIncome error
-	if lookback > 0 {
-		realizedPnl, errIncome = b.client.GetRealizedPnlSince(ctx, t.Symbol, since)
+	if b.cfg.Binance.Testnet {
+		// Testnet'te Income API realized PnL dönmeyebilir; kendimiz hesaplayıp yazıyoruz
+		if exitPrice == 0 {
+			exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
+		}
+		realizedPnl = b.realizedPnl(t, exitPrice)
+		log.Printf("[trade] KAPANIŞ (testnet) | exit=%.8f | realized_pnl hesaplanan: %.4f", exitPrice, realizedPnl)
 	} else {
-		for attempt := 0; attempt < 3; attempt++ {
-			if attempt > 0 {
-				select {
-				case <-ctx.Done():
+		// Mainnet: Realized PnL Income API'den (komisyon dahil)
+		var errIncome error
+		if lookback > 0 {
+			realizedPnl, errIncome = b.client.GetRealizedPnlSince(ctx, t.Symbol, since)
+		} else {
+			for attempt := 0; attempt < 3; attempt++ {
+				if attempt > 0 {
+					select {
+					case <-ctx.Done():
+						break
+					case <-time.After(2 * time.Second):
+					}
+				}
+				realizedPnl, errIncome = b.client.GetRecentRealizedPnl(ctx, t.Symbol)
+				if errIncome == nil && (realizedPnl != 0 || attempt == 2) {
 					break
-				case <-time.After(2 * time.Second):
 				}
 			}
-			realizedPnl, errIncome = b.client.GetRecentRealizedPnl(ctx, t.Symbol)
-			if errIncome == nil && (realizedPnl != 0 || attempt == 2) {
-				break
+		}
+		if errIncome == nil && t.Quantity > 0 && exitPrice == 0 {
+			if t.Side == "LONG" {
+				exitPrice = t.EntryPrice + realizedPnl/t.Quantity
+			} else {
+				exitPrice = t.EntryPrice - realizedPnl/t.Quantity
 			}
 		}
-	}
-	if errIncome == nil && t.Quantity > 0 && exitPrice == 0 {
-		// userTrades'de fill yoksa exit'i Income PnL'den türet
-		if t.Side == "LONG" {
-			exitPrice = t.EntryPrice + realizedPnl/t.Quantity
-		} else {
-			exitPrice = t.EntryPrice - realizedPnl/t.Quantity
+		if exitPrice == 0 {
+			exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
+			realizedPnl = b.realizedPnl(t, exitPrice)
+			log.Printf("[trade] KAPANIŞ | exit/PNL tahmini (userTrades+Income yok)")
+		} else if exitPrice > 0 {
+			log.Printf("[trade] KAPANIŞ | exit_price userTrades: %.8f | realized_pnl Income: %.4f", exitPrice, realizedPnl)
 		}
-	}
-	if exitPrice == 0 {
-		exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
-		realizedPnl = b.realizedPnl(t, exitPrice)
-		log.Printf("[trade] KAPANIŞ | exit/PNL tahmini (userTrades+Income yok)")
-	} else if exitPrice > 0 {
-		log.Printf("[trade] KAPANIŞ | exit_price userTrades (gerçek fill): %.8f | realized_pnl Income: %.4f", exitPrice, realizedPnl)
 	}
 	balanceAfter, _ := b.client.GetUSDTBalance(ctx)
 	balanceAfterPtr := &balanceAfter
@@ -596,7 +617,7 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 		return err
 	}
 
-	quantity := b.quantity(price, info)
+	quantity := b.quantity(price, info, balBefore)
 	if quantity <= 0 {
 		return fmt.Errorf("quantity 0 veya negatif")
 	}
@@ -669,7 +690,7 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	orderIDStr := strconv.FormatInt(orderResp.OrderID, 10)
 	balanceBeforePtr := &balBefore
 	instanceID := b.cfg.Trade.InstanceID
-	marginUSD := b.cfg.Trade.PositionSizeUSD
+	marginUSD := b.effectiveMargin(balBefore)
 	notionalUSD := quantity * entryPrice
 	t := &db.Trade{
 		Symbol:             symbol,
@@ -700,9 +721,22 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	return b.telegram.Send(ctx, msg)
 }
 
-func (b *Bot) quantity(price float64, info *futures.Symbol) float64 {
-	margin := b.cfg.Trade.PositionSizeUSD
-	lev := b.cfg.Trade.Leverage
+// effectiveMargin işlem için kullanılacak marjı USDT döner (RiskPerTrade veya PositionSizeUSD).
+func (b *Bot) effectiveMargin(balance float64) float64 {
+	eff := b.getEffective().Trade
+	margin := eff.PositionSizeUSD
+	if balance > 0 && eff.RiskPerTrade > 0 && eff.StopLossPercent > 0 {
+		margin = balance * (eff.RiskPerTrade / 100) / (eff.StopLossPercent / 100)
+	}
+	if margin <= 0 {
+		margin = eff.PositionSizeUSD
+	}
+	return margin
+}
+
+func (b *Bot) quantity(price float64, info *futures.Symbol, balance float64) float64 {
+	margin := b.effectiveMargin(balance)
+	lev := b.getEffective().Trade.Leverage
 	if lev < 1 {
 		lev = 1
 	}

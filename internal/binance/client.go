@@ -187,9 +187,18 @@ func (c *Client) CloseAllOpenPositions(ctx context.Context) error {
 	return nil
 }
 
-// Klines mum verisi (interval örn: "30m", limit örn: 20).
+// Klines mum verisi (interval örn: "5m", limit örn: 200).
 func (c *Client) Klines(ctx context.Context, symbol, interval string, limit int) ([]*futures.Kline, error) {
 	return c.api.NewKlinesService().Symbol(symbol).Interval(interval).Limit(limit).Do(ctx)
+}
+
+// Get24hQuoteVolumeUSD sembolün son 24 saatteki işlem hacmini USDT (quote) cinsinden döner.
+func (c *Client) Get24hQuoteVolumeUSD(ctx context.Context, symbol string) (float64, error) {
+	stats, err := c.api.NewListPriceChangeStatsService().Symbol(symbol).Do(ctx)
+	if err != nil || len(stats) == 0 {
+		return 0, err
+	}
+	return parseFloat(stats[0].QuoteVolume), nil
 }
 
 // ExchangeInfo sembol bilgisi (lot size vb.).

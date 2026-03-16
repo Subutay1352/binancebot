@@ -40,29 +40,51 @@ type TelegramConfig struct {
 
 // TradeConfig: Tüm işlemler USDT çiftleri (BTCUSDT, ETHUSDT vb.). Margin = USDT (USDT-M Futures).
 type TradeConfig struct {
-	Symbol            string   // Tek sembol (TRADE_SYMBOL), örn. BTCUSDT
-	Symbols           []string // Taranacak çiftler (TRADE_SYMBOLS), sadece USDT pair: BTCUSDT, ETHUSDT...
-	StopLossPercent   float64
-	TakeProfitPercent float64
-	PositionSizeUSD   float64 // Marj (kilitleyeceğin USDT) per pozisyon; işlem büyüklüğü = PositionSizeUSD * Leverage
-	Leverage          int     // Kaldıraç (LEVERAGE); 5 ise 50 USDT marj → 250 USDT notional
-	MaxOpenTrades     int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
-	MaxLossesIn12h    int     // Son 12 saatte bu sayıdan fazla zarar varsa yeni işlem açılmaz (0=kapalı)
-	MinBalanceShutdown float64 // Futures bakiyesi bu değerin altına inerse bot kapanır, yeniden başlatılsa da tekrar kapanır (0=kapalı)
-	InstanceID        string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname); DB'de kim yazdı görmek için
-	ExecutorPollSec   int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
+	Symbol             string   // Tek sembol (TRADE_SYMBOL), örn. BTCUSDT
+	Symbols            []string // Taranacak çiftler (TRADE_SYMBOLS), sadece USDT pair: BTCUSDT, ETHUSDT...
+	StopLossPercent    float64
+	TakeProfitPercent  float64
+	PositionSizeUSD    float64 // Marj per pozisyon; RiskPerTrade > 0 ise marj = bakiye * RiskPerTrade% / StopLoss% (RR bazlı)
+	Leverage           int     // Kaldıraç (LEVERAGE); 5 ise 50 USDT marj → 250 USDT notional
+	RiskPerTrade       float64 // Her işlemde riske atılan bakiye yüzdesi (örn 1 = %1). 0 ise PositionSizeUSD kullanılır
+	Min24hVolumeUSD    float64 // Sadece 24s hacmi bu değerin üstündeki semboller taranır (0=kapalı, örn 100M)
+	MaxOpenTrades      int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
+	MaxLossesIn12h     int     // Son 12 saatte bu sayıdan fazla zarar varsa yeni işlem açılmaz (0=kapalı)
+	MinBalanceShutdown float64 // Futures bakiyesi bu değerin altına inerse bot kapanır (0=kapalı)
+	InstanceID         string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname)
+	ExecutorPollSec    int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
 }
 
-// StrategyConfig örnek strateji için. Kuralları sonradan .env ile değiştirebilirsin.
+// StrategyConfig hybrid strateji: trend (EMA) + RSI pullback + hacim + orderbook + volatility + liquidation.
 type StrategyConfig struct {
-	Interval30m         string  // "30m"
-	RSIPeriod           int     // 14
-	RSIThresholdLow     float64 // Long için RSI bu değerin altındaysa (örn 10)
-	RSIThresholdHigh    float64 // Short için RSI bu değerin üstündeyse (örn 90)
-	MinVolumeUSD        float64 // Hacim en az bu kadar USD
-	VolumeRatioVsPrev   float64 // Son mumdan en az bu katı
-	VolumeAvgPeriod     int     // Ortalama hacim için son N mum (0=kapalı)
-	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.0)
+	Interval            string  // Mum aralığı: "5m" (önerilen), "15m" daha stabil
+	RSIPeriod           int     // RSI periyodu (pullback için 7 önerilir)
+	RSIThresholdLow     float64 // Long pullback: RSI < bu (örn 35)
+	RSIThresholdHigh    float64 // Short pullback: RSI > bu (örn 65)
+	MinVolumeUSD        float64 // Hacim en az bu kadar USD (ek filtre)
+	VolumeRatioVsPrev   float64 // Son mumdan en az bu katı (ek filtre)
+	VolumeAvgPeriod     int     // Ortalama hacim için son N mum (20 önerilir)
+	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.8 = volume spike)
+
+	// Trend: EMA 50/200. Long: price > EMA200 && EMA50 > EMA200; Short: price < EMA200 && EMA50 < EMA200
+	EMAFast int // EMA hızlı (50 önerilir), 0=trend filtresi kapalı
+	EMASlow int // EMA yavaş (200 önerilir)
+
+	// Orderbook imbalance: bid_vol/(bid_vol+ask_vol). > LongMin = alım, < ShortMax = satım
+	OrderbookImbalanceEnable  bool    // ORDERBOOK_IMBALANCE_ENABLE
+	OrderbookImbalanceLongMin float64 // LONG için imbalance >= bu (0.65)
+	OrderbookImbalanceShortMax float64 // SHORT için imbalance <= bu (0.35)
+	OrderbookDepthLimit       int     // Depth kaç seviye (20)
+
+	// Volatility expansion: current ATR > avg ATR * ratio
+	VolatilityExpansionEnable bool    // VOLATILITY_EXPANSION_ENABLE
+	ATRPeriod                 int     // ATR periyodu (14)
+	ATRExpansionRatio         float64 // current ATR > avg ATR * bu oran (1.4)
+
+	// Liquidation cascade (WebSocket !forceOrder): son N saniyedeki liquidation hacmi (USD)
+	LiquidationCascadeEnable bool    // LIQUIDATION_CASCADE_ENABLE
+	LiquidationWindowSec     int     // Son kaç saniye (10)
+	LiquidationMinUSD        float64 // En az bu kadar USD (500k; BTC 2M, ETH 1M)
 }
 
 // Load .env dosyasını yükler ve Config döner.
@@ -83,14 +105,30 @@ func Load() (*Config, error) {
 		},
 		Trade: tradeConfigFromEnv(),
 		Strategy: StrategyConfig{
-			Interval30m:         env("STRATEGY_INTERVAL", "30m"),
-			RSIPeriod:           envInt("STRATEGY_RSI_PERIOD", 14),
-			RSIThresholdLow:     envFloat("STRATEGY_RSI_LOW", 10),
-			RSIThresholdHigh:    envFloat("STRATEGY_RSI_HIGH", 90),
+			Interval:            env("STRATEGY_INTERVAL", "5m"),
+			RSIPeriod:           envInt("STRATEGY_RSI_PERIOD", 7),
+			RSIThresholdLow:     envFloat("STRATEGY_RSI_LOW", 35),
+			RSIThresholdHigh:    envFloat("STRATEGY_RSI_HIGH", 65),
 			MinVolumeUSD:        envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
-			VolumeRatioVsPrev:   envFloat("STRATEGY_VOLUME_RATIO", 3),
+			VolumeRatioVsPrev:   envFloat("STRATEGY_VOLUME_RATIO", 1.5),
 			VolumeAvgPeriod:     envInt("STRATEGY_VOLUME_AVG_PERIOD", 20),
-			VolumeMinRatioToAvg: envFloat("STRATEGY_VOLUME_MIN_RATIO_AVG", 1.0),
+			VolumeMinRatioToAvg: envFloat("STRATEGY_VOLUME_MIN_RATIO_AVG", 1.8),
+
+			EMAFast: envInt("EMA_FAST", 50),
+			EMASlow: envInt("EMA_SLOW", 200),
+
+			OrderbookImbalanceEnable:   envBool("ORDERBOOK_IMBALANCE_ENABLE", false),
+			OrderbookImbalanceLongMin:  envFloat("ORDERBOOK_IMBALANCE_LONG_MIN", 0.65),
+			OrderbookImbalanceShortMax: envFloat("ORDERBOOK_IMBALANCE_SHORT_MAX", 0.35),
+			OrderbookDepthLimit:        envInt("ORDERBOOK_DEPTH_LIMIT", 20),
+
+			VolatilityExpansionEnable: envBool("VOLATILITY_EXPANSION_ENABLE", false),
+			ATRPeriod:                 envInt("ATR_PERIOD", 14),
+			ATRExpansionRatio:         envFloat("ATR_EXPANSION_RATIO", 1.4),
+
+			LiquidationCascadeEnable: envBool("LIQUIDATION_CASCADE_ENABLE", false),
+			LiquidationWindowSec:     envInt("LIQUIDATION_WINDOW_SEC", 10),
+			LiquidationMinUSD:        envFloat("LIQUIDATION_MIN_USD", 500_000),
 		},
 	}, nil
 }
@@ -147,16 +185,18 @@ func tradeConfigFromEnv() TradeConfig {
 		sym = symbols[0]
 	}
 	return TradeConfig{
-		Symbol:            sym,
-		Symbols:           symbols,
-		StopLossPercent:   envFloat("STOP_LOSS_PERCENT", 2.0),
-		TakeProfitPercent: envFloat("TAKE_PROFIT_PERCENT", 3.0),
-		PositionSizeUSD:   envFloat("POSITION_SIZE_USD", 100.0),
-		Leverage:          envInt("LEVERAGE", 3),
+		Symbol:             sym,
+		Symbols:            symbols,
+		StopLossPercent:    envFloat("STOP_LOSS_PERCENT", 3.0),
+		TakeProfitPercent:  envFloat("TAKE_PROFIT_PERCENT", 6.0),
+		PositionSizeUSD:    envFloat("POSITION_SIZE_USD", 100.0),
+		Leverage:           envInt("LEVERAGE", 3),
+		RiskPerTrade:      envFloat("RISK_PER_TRADE", 1.0),
+		Min24hVolumeUSD:   envFloat("MIN_24H_VOLUME_USD", 100_000_000),
 		MaxOpenTrades:     envInt("MAX_OPEN_TRADES", 5),
-		MaxLossesIn12h:     envInt("MAX_LOSSES_IN_12H", 2),
+		MaxLossesIn12h:    envInt("MAX_LOSSES_IN_12H", 2),
 		MinBalanceShutdown: envFloat("MIN_BALANCE_SHUTDOWN", 0),
-		InstanceID:         os.Getenv("BOT_INSTANCE_ID"),
+		InstanceID:        os.Getenv("BOT_INSTANCE_ID"),
 		ExecutorPollSec:   envInt("EXECUTOR_POLL_INTERVAL_SEC", 10),
 	}
 }
@@ -193,7 +233,7 @@ func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
 		out.Trade.TakeProfitPercent = v
 	}
 	if s := strings.TrimSpace(overrides["STRATEGY_INTERVAL"]); s != "" {
-		out.Strategy.Interval30m = s
+		out.Strategy.Interval = s
 	}
 	if v, ok := parseInt(overrides["STRATEGY_RSI_PERIOD"]); ok && v > 0 {
 		out.Strategy.RSIPeriod = v
@@ -227,7 +267,7 @@ func RuntimeConfigFromConfig(cfg *Config) map[string]string {
 	return map[string]string{
 		"STOP_LOSS_PERCENT":               strconv.FormatFloat(cfg.Trade.StopLossPercent, 'f', -1, 64),
 		"TAKE_PROFIT_PERCENT":             strconv.FormatFloat(cfg.Trade.TakeProfitPercent, 'f', -1, 64),
-		"STRATEGY_INTERVAL":               cfg.Strategy.Interval30m,
+		"STRATEGY_INTERVAL":               cfg.Strategy.Interval,
 		"STRATEGY_RSI_PERIOD":             strconv.Itoa(cfg.Strategy.RSIPeriod),
 		"STRATEGY_RSI_LOW":                strconv.FormatFloat(cfg.Strategy.RSIThresholdLow, 'f', -1, 64),
 		"STRATEGY_RSI_HIGH":               strconv.FormatFloat(cfg.Strategy.RSIThresholdHigh, 'f', -1, 64),

@@ -6,7 +6,7 @@ Binance USDT-M vadeli işlemlerde long/short açan, stop loss ve take profit koy
 
 Bot periyodik olarak belirlediğin sembolleri tarıyor. Strateji koşulu sağlanan bir coin’de açık pozisyon yoksa pozisyon açıyor, SL/TP koyuyor. Pozisyon kapanınca (SL/TP veya manuel) veritabanını güncelliyor. Dashboard’dan açık pozisyonları ve geçmiş işlemleri görebilirsin.
 
-Strateji şu an RSI + hacim bazlı (30m mum). Long için RSI belirli bir seviyenin altına düşmeli, short için üstüne çıkmalı; hacim filtresi de var. Tüm eşikler `.env` üzerinden ayarlanıyor, detay için `.env.example` dosyasına bak.
+Strateji trend (EMA 50/200) + RSI pullback + hacim + isteğe bağlı orderbook ve volatilite filtreleriyle çalışıyor. Tüm eşikler `.env` üzerinden (ve bir kısmı dashboard’dan) ayarlanıyor. **Hangi env/db değişkeninin neyi değiştirdiği ve stratejinin adım adım nasıl işlediği** için `STRATEGY_AND_CONFIG.md` dosyasına bak.
 
 ## Gereksinimler
 

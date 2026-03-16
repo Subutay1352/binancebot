@@ -200,7 +200,6 @@
             <th>Symbol</th>
             <th>Yön</th>
             <th>Giriş fiyat</th>
-            <th>Miktar</th>
             <th>USDT</th>
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>Anlık fiyat</th>
@@ -225,7 +224,6 @@
             <th>Symbol</th>
             <th>Yön</th>
             <th>Giriş</th>
-            <th>Miktar</th>
             <th>USDT</th>
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>SL / TP</th>
@@ -327,7 +325,6 @@
           '<td>' + (t.symbol || '-') + '</td>' +
           '<td class="' + sideClass + '">' + sideLabel + '</td>' +
           '<td>' + fmtPrice(t.entry_price) + '</td>' +
-          '<td>' + fmtNum(t.quantity) + '</td>' +
           '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
           '<td>' + marginStr + '</td>' +
           '<td>' + fmtPrice(t.current_price) + '</td>' +
@@ -378,7 +375,6 @@
           '<td>' + (t.symbol || '-') + '</td>' +
           '<td class="' + sideClass + '">' + sideLabel + '</td>' +
           '<td>' + fmtPrice(t.entry_price) + '</td>' +
-          '<td>' + fmtNum(t.quantity) + '</td>' +
           '<td>' + (usdtVal != null ? fmtNum(usdtVal) : '-') + '</td>' +
           '<td>' + marginStr + '</td>' +
           '<td>' + sl + ' / ' + tp + '</td>' +
@@ -507,7 +503,7 @@
     var settingsLabels = {
       'STOP_LOSS_PERCENT': 'Stop loss %',
       'TAKE_PROFIT_PERCENT': 'Take profit %',
-      'STRATEGY_INTERVAL': 'Mum aralığı (3m, 15m, 30m)',
+      'STRATEGY_INTERVAL': 'Mum aralığı (1m, 3m, 5m, 15m, 30m)',
       'STRATEGY_RSI_PERIOD': 'RSI periyodu',
       'STRATEGY_RSI_LOW': 'RSI low (long eşiği)',
       'STRATEGY_RSI_HIGH': 'RSI high (short eşiği)',
