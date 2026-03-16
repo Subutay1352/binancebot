@@ -83,20 +83,7 @@ POSITION_SIZE_USD=50
 
 ---
 
-## 5. Bağlantı kontrolü (işlem açmadan)
-
-Proje kökünde:
-
-```bash
-go run ./cmd/check
-```
-
-- Config ve PostgreSQL OK ise devam edebilirsin.
-- Binance uyarı verirse: API key, testnet ayarı ve interneti kontrol et.
-
----
-
-## 6. Tek sembol ile test (SL/TP Algo vb.)
+## 5. Tek sembol ile test (SL/TP Algo vb.)
 
 Sadece bir çiftte denemek için `.env` içinde:
 
@@ -108,7 +95,7 @@ TRADE_SYMBOLS=1000PEPEUSDT
 
 ---
 
-## 7. Botu çalıştırma
+## 6. Botu çalıştırma
 
 ```bash
 go run ./cmd/bot
@@ -130,16 +117,9 @@ go run ./cmd/bot >> bot.log 2>&1
 
 ---
 
-## 8. Dashboard (işlemleri görmek)
+## 7. Dashboard (işlemleri görmek)
 
-Ayrı bir terminalde:
-
-```bash
-go run ./api
-```
-
-Tarayıcıda: http://localhost:8080  
-Açık pozisyonlar ve toplam PnL burada görünür.
+Bot zaten çalışırken dashboard aynı process’te açık. Tarayıcıda http://localhost:8080 (PORT env’e göre). Açık pozisyonlar ve toplam PnL orada.
 
 ---
 

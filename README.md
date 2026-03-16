@@ -1,76 +1,53 @@
-# Binance Bot
+# Binance Futures Bot
 
-Binance Futures ile long/short işlem, stop loss / take profit ve Telegram bildirimi.  
-Kod: **sade, SOLID, anlaşılır**. Strateji kurallarını sonradan .env veya kodla değiştirebilirsin.
+Binance USDT-M vadeli işlemlerde long/short açan, stop loss ve take profit koyan bir bot. İstersen Telegram’a bildirim de atıyor.
 
-## Yapı
+## Ne yapıyor?
 
-```
-binancebot/
-├── config/             # Ayarlar (.env + Config)
-├── internal/
-│   ├── binance/        # Binance API (fiyat, kline, pozisyon, order)
-│   ├── db/             # PostgreSQL (Store, trade kayıtları)
-│   ├── strategy/       # Sinyal: Long / Short / Hold (örnek: RSI + hacim)
-│   ├── risk/           # SL/TP fiyat hesaplama
-│   ├── telegram/       # Bildirim
-│   └── bot/            # Scanner + Executor (aşağıda)
-├── cmd/bot/            # Bot çalıştırma
-├── api/                # Dashboard API (Gin)
-├── web/                # Dashboard arayüzü (tek sayfa)
-└── .env.example
-```
+Bot periyodik olarak belirlediğin sembolleri tarıyor. Strateji koşulu sağlanan bir coin’de açık pozisyon yoksa pozisyon açıyor, SL/TP koyuyor. Pozisyon kapanınca (SL/TP veya manuel) veritabanını güncelliyor. Dashboard’dan açık pozisyonları ve geçmiş işlemleri görebilirsin.
 
-### Bot nasıl çalışıyor?
-
-- **Scanner (cron)**: Her N dakikada bir tüm sembolleri (`TRADE_SYMBOLS` veya `TRADE_SYMBOL`) tarar. Koşul sağlayan ve o anda açık pozisyonu/executor’u olmayan semboller için bir **Executor** goroutine başlatır.
-- **Executor (sembol başına goroutine)**: Sadece o sembolde pozisyon açar, SL/TP koyar, kapanana kadar periyodik kontrol eder. Pozisyon kapanınca DB günceller, Telegram’a bildirir ve **goroutine sonlanır**. Aynı sembole tekrar giriş ancak bir sonraki scanner turunda, koşul tekrar sağlanırsa yapılır.
-
-## Strateji (örnek – sonradan değiştirilebilir)
-
-Şu an **örnek kural** var: 30 dakikalık RSI + hacim.
-
-- **Long**: 30m RSI &lt; 10 **ve** (hacim ≥ X USD **veya** son mumdan 3x fazla).
-- **Short**: 30m RSI &gt; 90 **ve** aynı hacim koşulu.
-
-Kuralları değiştirmek için:
-
-1. **.env** ile: `STRATEGY_RSI_LOW`, `STRATEGY_RSI_HIGH`, `STRATEGY_MIN_VOLUME_USD`, `STRATEGY_VOLUME_RATIO` (bkz. `.env.example`).
-2. **Kod** ile: `internal/strategy/example.go` içindeki `Decide` mantığını düzenle veya yeni bir `Strategy` implementasyonu yaz.
+Strateji şu an RSI + hacim bazlı (30m mum). Long için RSI belirli bir seviyenin altına düşmeli, short için üstüne çıkmalı; hacim filtresi de var. Tüm eşikler `.env` üzerinden ayarlanıyor, detay için `.env.example` dosyasına bak.
 
 ## Gereksinimler
 
 - Go 1.21+
 - PostgreSQL
-- .env (`.env.example` → `.env`)
+- Binance Futures API key (gerçek veya testnet)
 
-## Veritabanı
-
-- `DATABASE_URL` doluysa tek satırda kullanılır.
-- Yoksa: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
-
-İlk çalıştırmada `trades` tablosu otomatik oluşturulur.
-
-## Çalıştırma
+## Kurulum
 
 ```bash
 cp .env.example .env
-# .env içini doldur (Binance, PostgreSQL, Telegram)
+```
 
+`.env` içinde en az şunları doldur: Binance API key/secret, veritabanı bilgisi. Telegram istemiyorsan `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` boş bırak, mesaj atmaz.
+
+Veritabanı için ya tek satırda `DATABASE_URL` verirsin ya da `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` ayrı ayrı. İlk çalıştırmada `trades` tablosu kendisi oluşuyor.
+
+```bash
 go mod tidy
 ```
 
-**Bot** (strateji döngüsü + işlem + Telegram):
+## Çalıştırma
 
 ```bash
 go run ./cmd/bot
 ```
 
-**Dashboard API + arayüz** (işlem listesi, toplam PnL, açık pozisyon):
 
-```bash
-go run ./api
-# Tarayıcı: http://localhost:8080
-```
+Bot çalışırken dashboard aynı process'te açılır. Tarayıcıda `http://localhost:8080` (PORT env ile değiştirilebilir). Açık pozisyonlar ve PnL oradan takip edilir.
 
-İstersen bot ve API’yi aynı anda çalıştır (iki terminal).
+Testnet kullanacaksan `.env`’de `BINANCE_FUTURES_TESTNET=true` yap; API key’leri de testnet.binancefuture.com üzerinden al.
+
+## Proje yapısı
+
+- `cmd/bot` — Bot’un ana giriş noktası
+- `internal/bot` — Tarama döngüsü, executor’lar, pozisyon açma/kapatma
+- `internal/strategy` — Sinyal mantığı (örnek: RSI + hacim + MA)
+- `internal/binance` — Binance API çağrıları
+- `internal/db` — Trade kayıtları, açık pozisyon sorguları
+- `internal/risk` — SL/TP fiyat hesaplama
+- `internal/telegram` — Bildirim (token/chatID boşsa devre dışı)
+- `internal/apiserver` — Dashboard (Gin, tek sayfa; bot ile aynı process’te)
+
+Stratejiyi değiştirmek için `internal/strategy/example.go` içindeki `Decide` fonksiyonunu veya `.env`’deki `STRATEGY_*` değişkenlerini kullan.

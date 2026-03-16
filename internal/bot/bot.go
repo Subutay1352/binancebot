@@ -426,7 +426,7 @@ func (b *Bot) setRateLimitFromError(err error) {
 	}
 	b.rateLimitMu.Unlock()
 	if !already {
-		log.Printf("[rate_limit] Binance -1003 ban algılandı, %v kadar API çağrısı yapılmayacak", until.Sub(time.Now()).Round(time.Second))
+		log.Printf("[rate_limit] Binance -1003 ban algılandı, %v kadar API çağrısı yapılmayacak", time.Until(until).Round(time.Second))
 	}
 }
 
