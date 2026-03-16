@@ -19,9 +19,10 @@ type Config struct {
 }
 
 type BinanceConfig struct {
-	APIKey    string
-	SecretKey string
-	Testnet   bool
+	APIKey                 string
+	SecretKey              string
+	Testnet                bool
+	TestnetCleanupOnStart  bool // true ise başlangıçta açık pozisyonlar kapatılır ve trades tablosu temizlenir (sadece testnet'te anlamlı)
 }
 
 type PostgresConfig struct {
@@ -91,12 +92,14 @@ type StrategyConfig struct {
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
+	testnet := envBool("BINANCE_FUTURES_TESTNET", true)
 	return &Config{
 		BotEnabled: envBool("BOT_ENABLED", true),
 		Binance: BinanceConfig{
-			APIKey:    os.Getenv("BINANCE_API_KEY"),
-			SecretKey: os.Getenv("BINANCE_SECRET_KEY"),
-			Testnet:   envBool("BINANCE_FUTURES_TESTNET", true),
+			APIKey:                os.Getenv("BINANCE_API_KEY"),
+			SecretKey:             os.Getenv("BINANCE_SECRET_KEY"),
+			Testnet:               testnet,
+			TestnetCleanupOnStart: testnet && envBool("BINANCE_TESTNET_CLEANUP_ON_START", false),
 		},
 		Postgres: postgresFromEnv(),
 		Telegram: TelegramConfig{

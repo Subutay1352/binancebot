@@ -105,8 +105,8 @@ func (b *Bot) Run(ctx context.Context) {
 		os.Exit(0)
 	}
 
-	if b.cfg.Binance.Testnet {
-		log.Printf("[bot] testnet: açık algo emirleri ve pozisyonlar temizleniyor...")
+	if b.cfg.Binance.Testnet && b.cfg.Binance.TestnetCleanupOnStart {
+		log.Printf("[bot] testnet (CLEANUP_ON_START=1): açık algo emirleri ve pozisyonlar temizleniyor...")
 		if err := b.client.CancelAllOpenAlgoOrders(ctx); err != nil {
 			log.Printf("[bot] testnet: algo temizliği atlandı (testnet imza hatası olabilir, bot çalışmaya devam ediyor): %v", err)
 		}

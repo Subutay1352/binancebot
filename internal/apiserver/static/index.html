@@ -204,9 +204,11 @@
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>Anlık fiyat</th>
             <th>Bekleyen PnL</th>
+            <th>PnL %</th>
             <th>Stop loss</th>
             <th>Take profit</th>
             <th>Açılış</th>
+            <th>İşlem</th>
           </tr>
         </thead>
         <tbody id="openTbody"></tbody>
@@ -216,7 +218,7 @@
   </div>
 
   <div class="section">
-    <div class="section-title">Son işlemler</div>
+    <div class="section-title">Tamamlanan işlemler</div>
     <div id="tradesTableWrap" class="table-wrap">
       <table>
         <thead>
@@ -228,6 +230,7 @@
             <th>Ana para / Kaldıraç / Genişlik</th>
             <th>SL / TP</th>
             <th>PnL</th>
+            <th>PnL %</th>
             <th>Durum</th>
             <th>Açılış</th>
             <th>Kapanış</th>
@@ -314,6 +317,9 @@
         const usdtVal = qty && entry ? qty * entry : null;
         const upnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl) : null;
         const pnlClass = upnl != null ? (upnl > 0 ? 'pnl-pos' : upnl < 0 ? 'pnl-neg' : '') : '';
+        const pnlPct = t.unrealized_pnl_pct != null ? Number(t.unrealized_pnl_pct) : null;
+        const pnlPctStr = pnlPct != null ? (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%' : '-';
+        const pnlPctClass = pnlPct != null ? (pnlPct > 0 ? 'pnl-pos' : pnlPct < 0 ? 'pnl-neg' : '') : '';
         var lev = (t.leverage != null && Number(t.leverage) >= 1) ? Number(t.leverage) : 1;
         var notional = (t.notional_usdt != null && Number(t.notional_usdt) > 0) ? Number(t.notional_usdt) : usdtVal;
         var margin = (t.margin_usdt != null && Number(t.margin_usdt) >= 0) ? Number(t.margin_usdt) : (notional != null && lev ? notional / lev : null);
@@ -321,6 +327,7 @@
         if (margin != null && notional != null) {
           marginStr = fmtNum(margin) + ' USDT | ' + lev + 'x | ' + fmtNum(notional) + ' USDT';
         }
+        const sym = (t.symbol || '').replace(/"/g, '&quot;');
         return '<tr>' +
           '<td>' + (t.symbol || '-') + '</td>' +
           '<td class="' + sideClass + '">' + sideLabel + '</td>' +
@@ -329,9 +336,11 @@
           '<td>' + marginStr + '</td>' +
           '<td>' + fmtPrice(t.current_price) + '</td>' +
           '<td class="' + pnlClass + '">' + (upnl != null ? fmtNum(upnl) : '-') + '</td>' +
+          '<td class="' + pnlPctClass + '">' + pnlPctStr + '</td>' +
           '<td>' + fmtPrice(t.stop_loss) + '</td>' +
           '<td>' + fmtPrice(t.take_profit) + '</td>' +
           '<td>' + fmtDate(t.opened_at) + '</td>' +
+          '<td><button type="button" class="btn" style="background:#2f3640;color:#e7e9ea;padding:0.35rem 0.65rem;font-size:0.8rem;" onclick="closePosition(\'' + sym + '\', this)">Kapat</button></td>' +
           '</tr>';
       }).join('');
     }
@@ -367,6 +376,11 @@
         const usdtVal = qty && entry ? qty * entry : null;
         var lev = t.leverage != null ? Number(t.leverage) : 1;
         if (lev < 1) lev = 1;
+        var marginForPct = (t.margin_usdt != null && Number(t.margin_usdt) > 0) ? Number(t.margin_usdt) : null;
+        if (marginForPct == null && usdtVal != null && lev) marginForPct = usdtVal / lev;
+        const pnlPctVal = (pnlVal != null && marginForPct != null && marginForPct > 0) ? (pnlVal / marginForPct) * 100 : null;
+        const pnlPctStr = pnlPctVal != null ? (pnlPctVal >= 0 ? '+' : '') + pnlPctVal.toFixed(2) + '%' : '-';
+        const pnlPctClass = pnlPctVal != null ? (pnlPctVal > 0 ? 'pnl-pos' : pnlPctVal < 0 ? 'pnl-neg' : '') : '';
         var marginStr = '-';
         if (usdtVal != null && lev) {
           marginStr = fmtNum(usdtVal / lev) + ' USDT | ' + lev + 'x | ' + fmtNum(usdtVal) + ' USDT';
@@ -379,11 +393,40 @@
           '<td>' + marginStr + '</td>' +
           '<td>' + sl + ' / ' + tp + '</td>' +
           '<td class="' + pnlClass + '">' + pnlStr + '</td>' +
+          '<td class="' + pnlPctClass + '">' + pnlPctStr + '</td>' +
           '<td>' + status + '</td>' +
           '<td>' + fmtDate(t.opened_at) + '</td>' +
           '<td>' + fmtDate(t.closed_at) + '</td>' +
           '</tr>';
       }).join('');
+    }
+
+    function closePosition(symbol, btnEl) {
+      if (!symbol || !btnEl) return;
+      if (!confirm(symbol + ' için pozisyonu kapatmak istediğinize emin misiniz?')) return;
+      btnEl.disabled = true;
+      btnEl.textContent = 'Kapatılıyor...';
+      fetch('/api/close-position', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: symbol })
+      })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(o) {
+          if (o.ok && o.data && o.data.ok) {
+            loadAll();
+          } else {
+            var msg = (o.data && o.data.error) ? o.data.error : 'Pozisyon kapatılamadı';
+            alert(msg);
+          }
+        })
+        .catch(function(e) {
+          alert('Hata: ' + (e.message || 'bilinmeyen'));
+        })
+        .finally(function() {
+          btnEl.disabled = false;
+          btnEl.textContent = 'Kapat';
+        });
     }
 
     function showError(msg) {

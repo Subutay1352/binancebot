@@ -46,6 +46,7 @@ Tarama aralığı, sembol listesi, SL/TP, strateji parametreleri hep config’te
 | **BINANCE_API_KEY** | Binance Futures API anahtarı. |
 | **BINANCE_SECRET_KEY** | Binance Futures API gizli anahtarı. |
 | **BINANCE_FUTURES_TESTNET** | `true` = testnet, `false` = canlı piyasa. Testnet’te gerçek para yok; kapanışta realized PnL borsadan gelmeyebildiği için bot kendi hesaplar. |
+| **BINANCE_TESTNET_CLEANUP_ON_START** | `true` ise (ve testnet açıksa) bot başlarken açık pozisyonları kapatır ve trades tablosunu temizler. Varsayılan: `false`. |
 
 ### 3.2 Veritabanı
 

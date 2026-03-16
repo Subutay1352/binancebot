@@ -66,6 +66,69 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
 		}
 		c.JSON(http.StatusOK, list)
 	})
+	r.POST("/api/close-position", func(c *gin.Context) {
+		var body struct {
+			Symbol string `json:"symbol"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.Symbol == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "symbol gerekli (örn. {\"symbol\": \"BTCUSDT\"})"})
+			return
+		}
+		ctx := c.Request.Context()
+		symbol := strings.TrimSpace(strings.ToUpper(body.Symbol))
+		trade, err := store.OpenTradeBySymbol(ctx, symbol)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if trade == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "bu sembol için açık pozisyon yok"})
+			return
+		}
+		info, err := bnClient.ExchangeInfo(ctx, symbol)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "sembol bilgisi alınamadı: " + err.Error()})
+			return
+		}
+		stepSize := info.MarketLotSizeFilter().StepSize
+		qtyStr := binance.FormatQuantityForAPI(trade.Quantity, stepSize)
+		if err := bnClient.ClosePositionMarket(ctx, symbol, trade.Side, qtyStr); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "pozisyon kapatılamadı: " + err.Error()})
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		var exitPrice float64
+		if cfg.Binance.Testnet {
+			exitPrice, _ = bnClient.GetPrice(ctx, symbol)
+		} else {
+			since := time.Now().Add(-2 * time.Minute)
+			exitPrice, err = bnClient.GetRecentCloseFillPrice(ctx, symbol, trade.Side, since)
+			if err != nil {
+				exitPrice, _ = bnClient.GetPrice(ctx, symbol)
+			}
+		}
+		if exitPrice <= 0 {
+			exitPrice, _ = bnClient.GetPrice(ctx, symbol)
+		}
+		var realizedPnl float64
+		if cfg.Binance.Testnet {
+			qty := trade.Quantity
+			entry := trade.EntryPrice
+			if trade.Side == "LONG" {
+				realizedPnl = (exitPrice - entry) * qty
+			} else {
+				realizedPnl = (entry - exitPrice) * qty
+			}
+		} else {
+			realizedPnl, _ = bnClient.GetRecentRealizedPnl(ctx, symbol)
+		}
+		balanceAfter, _ := bnClient.GetUSDTBalance(ctx)
+		if err := store.CloseTrade(ctx, trade.ID, exitPrice, realizedPnl, &balanceAfter, "MANUAL"); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "kayıt güncellenemedi: " + err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "symbol": symbol, "exit_price": exitPrice, "realized_pnl": realizedPnl})
+	})
 	r.GET("/api/open-positions-live", func(c *gin.Context) {
 		list, err := store.OpenTrades(c.Request.Context())
 		if err != nil {
@@ -108,9 +171,15 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config) {
 					unrealized = (entry - curPrice) * qty
 				}
 				item["unrealized_pnl"] = unrealized
+				if marginUSD > 0 {
+					item["unrealized_pnl_pct"] = (unrealized / marginUSD) * 100
+				} else {
+					item["unrealized_pnl_pct"] = nil
+				}
 			} else {
 				item["current_price"] = nil
 				item["unrealized_pnl"] = nil
+				item["unrealized_pnl_pct"] = nil
 			}
 			out = append(out, item)
 		}
