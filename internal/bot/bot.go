@@ -203,6 +203,7 @@ func (b *Bot) Run(ctx context.Context) {
 				os.Exit(0)
 			}
 		}
+		b.closeTradesExceedingMaxDuration(ctx)
 		if b.isRateLimited() {
 			log.Printf("[scanner] tur atlandı (Binance rate limit, ban süresi dolana kadar bekleniyor)")
 			return
@@ -307,6 +308,17 @@ func (b *Bot) scanOne(ctx context.Context, symbol string) error {
 		if err == nil && lossCount > b.cfg.Trade.MaxLossesIn12h {
 			log.Printf("[scanner] %s sinyal=%s ATLANDI | son 12 saatte %d zarar (max=%d)", symbol, sig, lossCount, b.cfg.Trade.MaxLossesIn12h)
 			return nil
+		}
+	}
+
+	// Cooldown: sembol yeni kapandıysa N dakika tekrar açma (DB'den COIN_COOLDOWN_MIN)
+	if cc := b.getEffective().Trade.CoinCooldownMin; cc > 0 {
+		lastClosed, err := b.store.LastClosedAtForSymbol(ctx, symbol)
+		if err == nil && lastClosed != nil {
+			if since := time.Since(*lastClosed); since < time.Duration(cc)*time.Minute {
+				log.Printf("[scanner] %s sinyal=%s ATLANDI | cooldown (kapanalı %v, %d dk bekle)", symbol, sig, since.Round(time.Second), cc)
+				return nil
+			}
 		}
 	}
 
@@ -518,6 +530,72 @@ func (b *Bot) setActive(symbol string, add bool) {
 	} else {
 		delete(b.activeSymbols, symbol)
 	}
+}
+
+// closeTradesExceedingMaxDuration her tarama öncesi çağrılır; MAX_TRADE_DURATION_MIN aşan açık pozisyonları borsada kapatıp DB günceller.
+func (b *Bot) closeTradesExceedingMaxDuration(ctx context.Context) {
+	maxMin := b.getEffective().Trade.MaxTradeDurationMin
+	if maxMin <= 0 {
+		return
+	}
+	openList, err := b.store.OpenTrades(ctx)
+	if err != nil || len(openList) == 0 {
+		return
+	}
+	deadline := time.Duration(maxMin) * time.Minute
+	for i := range openList {
+		t := &openList[i]
+		if time.Since(t.OpenedAt) <= deadline {
+			continue
+		}
+		log.Printf("[bot] %s trade_id=%d max süre aşıldı (açılış: %v) → zorla kapatılıyor", t.Symbol, t.ID, t.OpenedAt)
+		if err := b.closeTradeNow(ctx, t, "MAX_DURATION"); err != nil {
+			log.Printf("[bot] %s zorla kapatma hata: %v", t.Symbol, err)
+		}
+	}
+}
+
+// closeTradeNow pozisyonu borsada market ile kapatır, exit_price/realized_pnl alıp DB'ye yazar. reason: MAX_DURATION, MANUAL vb.
+func (b *Bot) closeTradeNow(ctx context.Context, t *db.Trade, reason string) error {
+	info, err := b.client.ExchangeInfo(ctx, t.Symbol)
+	if err != nil {
+		return fmt.Errorf("exchange info: %w", err)
+	}
+	stepSize := info.MarketLotSizeFilter().StepSize
+	qtyStr := binance.FormatQuantityForAPI(t.Quantity, stepSize)
+	if err := b.client.ClosePositionMarket(ctx, t.Symbol, t.Side, qtyStr); err != nil {
+		return err
+	}
+	time.Sleep(500 * time.Millisecond)
+	exitPrice, _ := b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, time.Now().Add(-2*time.Minute))
+	var realizedPnl float64
+	if b.cfg.Binance.Testnet {
+		if exitPrice == 0 {
+			exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
+		}
+		realizedPnl = b.realizedPnl(t, exitPrice)
+	} else {
+		realizedPnl, _ = b.client.GetRecentRealizedPnl(ctx, t.Symbol)
+		if exitPrice == 0 {
+			if t.Side == "LONG" {
+				exitPrice = t.EntryPrice + realizedPnl/t.Quantity
+			} else {
+				exitPrice = t.EntryPrice - realizedPnl/t.Quantity
+			}
+		}
+		if exitPrice == 0 {
+			exitPrice, _ = b.client.GetPrice(ctx, t.Symbol)
+			realizedPnl = b.realizedPnl(t, exitPrice)
+		}
+	}
+	balanceAfter, _ := b.client.GetUSDTBalance(ctx)
+	balanceAfterPtr := &balanceAfter
+	if err := b.store.CloseTrade(ctx, t.ID, exitPrice, realizedPnl, balanceAfterPtr, reason); err != nil {
+		return err
+	}
+	msg := fmt.Sprintf("🔴 Pozisyon kapandı (%s)\n%s %s\nÇıkış: %.8f | PnL: %.4f | Bakiye: %.4f USDT", reason, t.Symbol, t.Side, exitPrice, realizedPnl, balanceAfter)
+	_ = b.telegram.Send(ctx, msg)
+	return nil
 }
 
 // checkPositionClosed DB'de pozisyonu kapatır; exit_price ve realized_pnl borsa verisi (userTrades fill + Income PnL).

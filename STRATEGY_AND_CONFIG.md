@@ -77,6 +77,8 @@ Tarama aralığı, sembol listesi, SL/TP, strateji parametreleri hep config’te
 | **MIN_24H_VOLUME_USD** | Sadece **son 24 saatin işlem hacmi (USDT)** bu değerin üstünde olan coinler taranır. 0 = filtre yok. Örn. 100000000 = 100M USDT. |
 | **MAX_OPEN_TRADES** | Aynı anda en fazla kaç açık pozisyon olabilir. 0 = sınırsız. |
 | **MAX_LOSSES_IN_12H** | Son 12 saatte bu sayıdan fazla **zararla** kapanan işlem varsa yeni işlem açılmaz. 0 = kapatılmış. |
+| **COIN_COOLDOWN_MIN** | Bir sembol kapandıktan sonra bu **dakika** boyunca tekrar işlem açılmaz. 0 = kapalı. Varsayılan 30. DB runtime (UI Ayarlar) ile değiştirilebilir. |
+| **MAX_TRADE_DURATION_MIN** | Açık pozisyon **bu dakikayı aşarsa** tarama başında zorla market kapatılır. 0 = kapalı. Varsayılan 120. DB runtime (UI Ayarlar) ile değiştirilebilir. |
 | **MIN_BALANCE_SHUTDOWN** | Futures bakiyesi bu USDT’nin altına inerse bot **process’i kapatır** (exit). 0 = kapatma yok. |
 | **BOT_INSTANCE_ID** | Hangi makine/süreç çalışıyor (log ve DB’de görünür). Boşsa hostname kullanılır. |
 | **EXECUTOR_POLL_INTERVAL_SEC** | Açık pozisyonlar kaç saniyede bir “borsada hâlâ açık mı / kapandı mı” diye kontrol edilir. 0 = varsayılan (60 sn). |

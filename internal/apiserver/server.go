@@ -305,16 +305,33 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config, tg *tele
 			pct := float64(winrateWins) / float64(winrateTotal) * 100
 			winratePct = &pct
 		}
+		totalProfit, totalLoss, _ := store.ProfitAndLossTotals(ctx)
+		var profitFactor *float64
+		if totalLoss > 0 {
+			pf := totalProfit / totalLoss
+			profitFactor = &pf
+		}
+		maxDrawdown, _ := store.MaxDrawdown(ctx)
+		var avgTradePnl *float64
+		if closedCount > 0 {
+			avg := total / float64(closedCount)
+			avgTradePnl = &avg
+		}
+		avgDurationSec, _ := store.AvgTradeDurationSeconds(ctx)
 		c.JSON(http.StatusOK, gin.H{
-			"total_pnl":      total,
-			"pnl_last_24h":   pnl24h,
-			"pnl_today":      pnlToday,
-			"open_positions": openPositions,
-			"open_count":     openCount,
-			"closed_count":   closedCount,
-			"winrate_pct":    winratePct,
-			"winrate_wins":   winrateWins,
-			"winrate_total":  winrateTotal,
+			"total_pnl":            total,
+			"pnl_last_24h":         pnl24h,
+			"pnl_today":            pnlToday,
+			"open_positions":       openPositions,
+			"open_count":           openCount,
+			"closed_count":         closedCount,
+			"winrate_pct":          winratePct,
+			"winrate_wins":         winrateWins,
+			"winrate_total":        winrateTotal,
+			"profit_factor":        profitFactor,
+			"max_drawdown":         maxDrawdown,
+			"avg_trade_pnl":        avgTradePnl,
+			"avg_trade_duration_sec": avgDurationSec,
 		})
 	})
 

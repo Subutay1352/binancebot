@@ -174,6 +174,22 @@
       <div id="winrate" class="value neutral">-</div>
     </div>
     <div class="card">
+      <h3>Profit Factor</h3>
+      <div id="profitFactor" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Max Drawdown</h3>
+      <div id="maxDrawdown" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Ort. İşlem (PnL)</h3>
+      <div id="avgTradePnl" class="value neutral">-</div>
+    </div>
+    <div class="card">
+      <h3>Ort. İşlem Süresi</h3>
+      <div id="avgTradeDuration" class="value neutral">-</div>
+    </div>
+    <div class="card">
       <h3>Sunucu IP (Binance)</h3>
       <div id="serverIp" class="value neutral" style="font-size:0.95rem;">-</div>
     </div>
@@ -265,6 +281,17 @@
       if (isNaN(d.getTime())) return '-';
       return d.toLocaleString('tr');
     }
+    function fmtDuration(sec) {
+      if (sec == null || sec === undefined || isNaN(sec) || sec < 0) return '-';
+      var s = Math.round(Number(sec));
+      if (s < 60) return s + ' sn';
+      var m = Math.floor(s / 60);
+      s = s % 60;
+      if (m < 60) return (s > 0 ? m + ' dk ' + s + ' sn' : m + ' dk');
+      var h = Math.floor(m / 60);
+      m = m % 60;
+      return (m > 0 || s > 0) ? (h + ' s ' + m + ' dk') : (h + ' s');
+    }
 
     function setPnlEl(id, val) {
       var el = document.getElementById(id);
@@ -298,6 +325,43 @@
           winrateEl.textContent = (winratePct != null ? winratePct.toFixed(1) + '%' : '-') + ' (' + winrateWins + '/' + winrateTotal + ')';
           winrateEl.className = 'value ' + (winratePct >= 50 ? 'positive' : winratePct < 50 && winrateTotal > 0 ? 'negative' : 'neutral');
         }
+      }
+      var pfEl = document.getElementById('profitFactor');
+      if (pfEl) {
+        var closedCnt = data.closed_count != null ? Number(data.closed_count) : 0;
+        var pf = data.profit_factor != null ? Number(data.profit_factor) : null;
+        if (closedCnt === 0) {
+          pfEl.textContent = '-';
+          pfEl.className = 'value neutral';
+        } else if (pf == null) {
+          pfEl.textContent = '\u221e';
+          pfEl.className = 'value positive';
+        } else {
+          pfEl.textContent = pf.toFixed(2);
+          pfEl.className = 'value ' + (pf >= 1 ? 'positive' : 'negative');
+        }
+      }
+      var ddEl = document.getElementById('maxDrawdown');
+      if (ddEl) {
+        var dd = data.max_drawdown != null ? Number(data.max_drawdown) : null;
+        if (dd == null) { ddEl.textContent = '-'; ddEl.className = 'value neutral'; }
+        else { ddEl.textContent = fmtNum(dd) + ' USDT'; ddEl.className = 'value ' + (dd > 0 ? 'negative' : 'neutral'); }
+      }
+      var avgPnlEl = document.getElementById('avgTradePnl');
+      if (avgPnlEl) {
+        var avgPnl = data.avg_trade_pnl != null ? Number(data.avg_trade_pnl) : null;
+        if (avgPnl == null || (data.closed_count != null && Number(data.closed_count) === 0)) {
+          avgPnlEl.textContent = '-';
+          avgPnlEl.className = 'value neutral';
+        } else {
+          avgPnlEl.textContent = fmtNum(avgPnl) + ' USDT';
+          avgPnlEl.className = 'value ' + (avgPnl >= 0 ? 'positive' : 'negative');
+        }
+      }
+      var avgDurEl = document.getElementById('avgTradeDuration');
+      if (avgDurEl) {
+        avgDurEl.textContent = fmtDuration(data.avg_trade_duration_sec);
+        avgDurEl.className = 'value neutral';
       }
     }
     function setBalance(bal, avail, inUse) {
@@ -563,6 +627,8 @@
     var settingsLabels = {
       'STOP_LOSS_PERCENT': 'Stop loss %',
       'TAKE_PROFIT_PERCENT': 'Take profit %',
+      'COIN_COOLDOWN_MIN': 'Sembol cooldown (dk) – kapanınca bu süre tekrar açılmaz',
+      'MAX_TRADE_DURATION_MIN': 'Max işlem süresi (dk) – aşan pozisyon zorla kapatılır, 0=kapalı',
       'STRATEGY_INTERVAL': 'Mum aralığı (1m, 3m, 5m, 15m, 30m)',
       'STRATEGY_RSI_PERIOD': 'RSI periyodu',
       'STRATEGY_RSI_LOW': 'RSI low (long eşiği)',
@@ -607,7 +673,7 @@
       if (btn) btn.disabled = true;
       if (status) status.textContent = 'Kaydediliyor...';
       var body = {};
-      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
+      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','COIN_COOLDOWN_MIN','MAX_TRADE_DURATION_MIN','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
       keys.forEach(function(key) {
         var el = document.getElementById('set_' + key);
         if (el) body[key] = el.value.trim();

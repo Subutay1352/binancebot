@@ -247,6 +247,56 @@ func (s *Store) LossCountLast12h(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// LastClosedAtForSymbol sembolün en son kapanış zamanını döner (cooldown kontrolü için). Hiç kapanmamışsa nil, nil.
+func (s *Store) LastClosedAtForSymbol(ctx context.Context, symbol string) (*time.Time, error) {
+	var t time.Time
+	err := s.pool.QueryRow(ctx, `SELECT closed_at FROM trades WHERE symbol = $1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`, symbol).Scan(&t)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// ProfitAndLossTotals kapalı işlemlerde toplam kar (realized_pnl>0) ve toplam zarar (|realized_pnl| where <0). Zarar pozitif döner.
+func (s *Store) ProfitAndLossTotals(ctx context.Context) (totalProfit, totalLoss float64, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN realized_pnl < 0 THEN -realized_pnl ELSE 0 END), 0)
+		FROM trades WHERE closed_at IS NOT NULL
+	`).Scan(&totalProfit, &totalLoss)
+	return totalProfit, totalLoss, err
+}
+
+// MaxDrawdown balance_after_usdt serisi üzerinden hesaplanan maksimum düşüş (peak'ten trough'a USDT).
+func (s *Store) MaxDrawdown(ctx context.Context) (float64, error) {
+	var out *float64
+	err := s.pool.QueryRow(ctx, `
+		WITH ordered AS (
+			SELECT balance_after_usdt,
+			       MAX(balance_after_usdt) OVER (ORDER BY closed_at ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak
+			FROM trades WHERE closed_at IS NOT NULL AND balance_after_usdt IS NOT NULL
+		)
+		SELECT COALESCE(MAX(peak - balance_after_usdt), 0) FROM ordered
+	`).Scan(&out)
+	if err != nil || out == nil {
+		return 0, err
+	}
+	return *out, nil
+}
+
+// AvgTradeDurationSeconds kapalı işlemlerin ortalama süresi (açılış–kapanış) saniye.
+func (s *Store) AvgTradeDurationSeconds(ctx context.Context) (float64, error) {
+	var out *float64
+	err := s.pool.QueryRow(ctx, `SELECT AVG(EXTRACT(EPOCH FROM (closed_at - opened_at))) FROM trades WHERE closed_at IS NOT NULL`).Scan(&out)
+	if err != nil || out == nil {
+		return 0, err
+	}
+	return *out, nil
+}
+
 // DeleteAllTrades trades tablosundaki tüm kayıtları siler (testnet başlangıç temizliği için).
 func (s *Store) DeleteAllTrades(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM trades`)

@@ -51,7 +51,9 @@ type TradeConfig struct {
 	Min24hVolumeUSD    float64 // Sadece 24s hacmi bu değerin üstündeki semboller taranır (0=kapalı, örn 100M)
 	MaxOpenTrades      int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
 	MaxLossesIn12h     int     // Son 12 saatte bu sayıdan fazla zarar varsa yeni işlem açılmaz (0=kapalı)
-	MinBalanceShutdown float64 // Futures bakiyesi bu değerin altına inerse bot kapanır (0=kapalı)
+	CoinCooldownMin       int     // Bir sembol kapandıktan sonra bu dakika boyunca tekrar açılmaz (0=kapalı, DB runtime)
+	MaxTradeDurationMin   int     // Açık pozisyon bu dakikayı aşarsa zorla kapatılır (0=kapalı, DB runtime)
+	MinBalanceShutdown    float64 // Futures bakiyesi bu değerin altına inerse bot kapanır (0=kapalı)
 	InstanceID         string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname)
 	ExecutorPollSec    int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
 }
@@ -197,8 +199,10 @@ func tradeConfigFromEnv() TradeConfig {
 		RiskPerTrade:      envFloat("RISK_PER_TRADE", 1.0),
 		Min24hVolumeUSD:   envFloat("MIN_24H_VOLUME_USD", 100_000_000),
 		MaxOpenTrades:     envInt("MAX_OPEN_TRADES", 5),
-		MaxLossesIn12h:    envInt("MAX_LOSSES_IN_12H", 2),
-		MinBalanceShutdown: envFloat("MIN_BALANCE_SHUTDOWN", 0),
+		MaxLossesIn12h:     envInt("MAX_LOSSES_IN_12H", 2),
+		CoinCooldownMin:     envInt("COIN_COOLDOWN_MIN", 30),
+		MaxTradeDurationMin: envInt("MAX_TRADE_DURATION_MIN", 120),
+		MinBalanceShutdown:  envFloat("MIN_BALANCE_SHUTDOWN", 0),
 		InstanceID:        os.Getenv("BOT_INSTANCE_ID"),
 		ExecutorPollSec:   envInt("EXECUTOR_POLL_INTERVAL_SEC", 10),
 	}
@@ -235,6 +239,12 @@ func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
 	if v, ok := parseFloat(overrides["TAKE_PROFIT_PERCENT"]); ok {
 		out.Trade.TakeProfitPercent = v
 	}
+	if v, ok := parseInt(overrides["COIN_COOLDOWN_MIN"]); ok && v >= 0 {
+		out.Trade.CoinCooldownMin = v
+	}
+	if v, ok := parseInt(overrides["MAX_TRADE_DURATION_MIN"]); ok && v >= 0 {
+		out.Trade.MaxTradeDurationMin = v
+	}
 	if s := strings.TrimSpace(overrides["STRATEGY_INTERVAL"]); s != "" {
 		out.Strategy.Interval = s
 	}
@@ -270,6 +280,8 @@ func RuntimeConfigFromConfig(cfg *Config) map[string]string {
 	return map[string]string{
 		"STOP_LOSS_PERCENT":               strconv.FormatFloat(cfg.Trade.StopLossPercent, 'f', -1, 64),
 		"TAKE_PROFIT_PERCENT":             strconv.FormatFloat(cfg.Trade.TakeProfitPercent, 'f', -1, 64),
+		"COIN_COOLDOWN_MIN":               strconv.Itoa(cfg.Trade.CoinCooldownMin),
+		"MAX_TRADE_DURATION_MIN":          strconv.Itoa(cfg.Trade.MaxTradeDurationMin),
 		"STRATEGY_INTERVAL":               cfg.Strategy.Interval,
 		"STRATEGY_RSI_PERIOD":             strconv.Itoa(cfg.Strategy.RSIPeriod),
 		"STRATEGY_RSI_LOW":                strconv.FormatFloat(cfg.Strategy.RSIThresholdLow, 'f', -1, 64),
