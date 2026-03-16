@@ -240,10 +240,17 @@ func (s *Store) TradeCounts(ctx context.Context) (open, closed int, err error) {
 	return open, closed, err
 }
 
-// LossCountLast12h son 12 saatte zararla (realized_pnl < 0) kapanan işlem sayısı.
+// LossCountLast12h son 12 saatte zararla (realized_pnl < 0) kapanan işlem sayısı (tüm semboller).
 func (s *Store) LossCountLast12h(ctx context.Context) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM trades WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '12 hours' AND realized_pnl < 0`).Scan(&n)
+	return n, err
+}
+
+// LossCountLast12hForSymbol bu sembolde son 12 saatte zararla (realized_pnl < 0) kapanan işlem sayısı.
+func (s *Store) LossCountLast12hForSymbol(ctx context.Context, symbol string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM trades WHERE symbol = $1 AND closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '12 hours' AND realized_pnl < 0`, symbol).Scan(&n)
 	return n, err
 }
 

@@ -302,11 +302,11 @@ func (b *Bot) scanOne(ctx context.Context, symbol string) error {
 		}
 	}
 
-	// Son 12 saatte 2'den fazla zarar varsa yeni işlem açma
+	// Bu sembolde son 12 saatte N'den fazla zarar varsa bu sembole yeni işlem açma (sembol bazlı)
 	if b.cfg.Trade.MaxLossesIn12h > 0 {
-		lossCount, err := b.store.LossCountLast12h(ctx)
+		lossCount, err := b.store.LossCountLast12hForSymbol(ctx, symbol)
 		if err == nil && lossCount > b.cfg.Trade.MaxLossesIn12h {
-			log.Printf("[scanner] %s sinyal=%s ATLANDI | son 12 saatte %d zarar (max=%d)", symbol, sig, lossCount, b.cfg.Trade.MaxLossesIn12h)
+			log.Printf("[scanner] %s sinyal=%s ATLANDI | bu sembolde son 12 saatte %d zarar (max=%d)", symbol, sig, lossCount, b.cfg.Trade.MaxLossesIn12h)
 			return nil
 		}
 	}

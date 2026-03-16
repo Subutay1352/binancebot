@@ -50,7 +50,7 @@ type TradeConfig struct {
 	RiskPerTrade       float64 // Her işlemde riske atılan bakiye yüzdesi (örn 1 = %1). 0 ise PositionSizeUSD kullanılır
 	Min24hVolumeUSD    float64 // Sadece 24s hacmi bu değerin üstündeki semboller taranır (0=kapalı, örn 100M)
 	MaxOpenTrades      int     // Aynı anda en fazla bu kadar açık pozisyon (0 = sınırsız)
-	MaxLossesIn12h     int     // Son 12 saatte bu sayıdan fazla zarar varsa yeni işlem açılmaz (0=kapalı)
+	MaxLossesIn12h     int     // Aynı sembolde son 12 saatte bu sayıdan fazla zarar varsa o sembole tekrar açılmaz (0=kapalı)
 	CoinCooldownMin       int     // Bir sembol kapandıktan sonra bu dakika boyunca tekrar açılmaz (0=kapalı, DB runtime)
 	MaxTradeDurationMin   int     // Açık pozisyon bu dakikayı aşarsa zorla kapatılır (0=kapalı, DB runtime)
 	MinBalanceShutdown    float64 // Futures bakiyesi bu değerin altına inerse bot kapanır (0=kapalı)
