@@ -27,7 +27,7 @@ func (e *Example) SetConfig(cfg config.StrategyConfig) {
 	e.cfg = cfg
 }
 
-// Decide Trend (EMA) + RSI pullback + hacim + orderbook + volatility ile sinyal verir.
+// Decide EMA rejim + trend-yönlü RSI (momentum long / zayıflık short) + hacim + orderbook + volatility.
 func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 	needCandles := e.cfg.RSIPeriod + 25
 	if e.cfg.VolumeAvgPeriod > 0 && e.cfg.VolumeAvgPeriod > needCandles {
@@ -52,7 +52,7 @@ func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 	quoteVolumes := klineQuoteVolumes(klines)
 	n := len(closes)
 
-	// RSI pullback + hacim: Long = RSI < low, Short = RSI > high
+	// Trend-yönlü RSI + hacim: Long = RSI > HIGH (momentum), Short = RSI < LOW (zayıflık). Orta bantta Hold.
 	rsiVal := rsiWilder(closes, e.cfg.RSIPeriod)
 	if math.IsNaN(rsiVal) {
 		return Hold, nil
@@ -69,31 +69,41 @@ func (e *Example) Decide(ctx context.Context, symbol string) (Signal, error) {
 			volumeOK = false
 		}
 	}
+	prevRsi := rsiWilder(closes[:n-1], e.cfg.RSIPeriod)
+	slopeUp := !math.IsNaN(prevRsi) && rsiVal > prevRsi
+	slopeDown := !math.IsNaN(prevRsi) && rsiVal < prevRsi
+
 	var rsiSignal Signal
-	if rsiVal < e.cfg.RSIThresholdLow && volumeOK {
-		rsiSignal = Long
-	} else if rsiVal > e.cfg.RSIThresholdHigh && volumeOK {
-		rsiSignal = Short
+	if !volumeOK {
+		rsiSignal = Hold
+	} else if rsiVal > e.cfg.RSIThresholdHigh {
+		if e.cfg.RSISlopeEnable && !slopeUp {
+			rsiSignal = Hold
+		} else {
+			rsiSignal = Long
+		}
+	} else if rsiVal < e.cfg.RSIThresholdLow {
+		if e.cfg.RSISlopeEnable && !slopeDown {
+			rsiSignal = Hold
+		} else {
+			rsiSignal = Short
+		}
 	} else {
 		rsiSignal = Hold
 	}
 
-	// Trend filtresi: Long sadece uptrend (price > EMA200, EMA50 > EMA200), Short sadece downtrend
+	// Rejim: fiyat EMA_SLOW üstündeyse sadece Long; altında/ eşitte sadece Short (ters yönde sinyal kesilir)
 	if e.cfg.EMASlow > 0 && n >= e.cfg.EMASlow && rsiSignal != Hold {
 		price := closes[n-1]
 		emaSlow := ema(closes, e.cfg.EMASlow)
-		fastPeriod := e.cfg.EMAFast
-		if fastPeriod <= 0 {
-			fastPeriod = 50
-		}
-		emaFastVal := ema(closes, fastPeriod)
-		uptrend := price > emaSlow && emaFastVal > emaSlow
-		downtrend := price < emaSlow && emaFastVal < emaSlow
-		if rsiSignal == Long && !uptrend {
-			return Hold, nil
-		}
-		if rsiSignal == Short && !downtrend {
-			return Hold, nil
+		if price > emaSlow {
+			if rsiSignal == Short {
+				return Hold, nil
+			}
+		} else {
+			if rsiSignal == Long {
+				return Hold, nil
+			}
 		}
 	}
 

@@ -131,7 +131,7 @@ Bot zaten çalışırken dashboard aynı process’te açık. Tarayıcıda http:
 | Binance 401 / -2015 | Testnet key kullanıyor musun? `BINANCE_FUTURES_TESTNET=true` |
 | Binance -404 / connection | Testnet URL’leri açık mı, firewall/VPN |
 | Telegram gitmiyor | Token ve Chat ID doğru mu? Bot’a en az bir mesaj attın mı? |
-| Pozisyon açılmıyor | Strateji koşulu (örn. RSI 10’un altı) nadiren sağlanır; test için `STRATEGY_RSI_LOW=50` gibi gevşetebilirsin. |
+| Pozisyon açılmıyor | Trend-yönlü RSI: long için `STRATEGY_RSI_HIGH`’ı düşür (örn. 50), short için `STRATEGY_RSI_LOW`’u yükselt. |
 
 ---
 

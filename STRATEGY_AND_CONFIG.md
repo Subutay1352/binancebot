@@ -88,16 +88,17 @@ Tarama aralığı, sembol listesi, SL/TP, strateji parametreleri hep config’te
 | Değişken | Açıklama |
 |----------|----------|
 | **STRATEGY_INTERVAL** | Mum (kline) aralığı: `1m`, `3m`, `5m`, `15m`, `30m` vb. Strateji bu aralıktaki mumlara bakarak karar verir. 5m dengeli, 15m daha sakin. |
-| **EMA_FAST** | Hızlı EMA periyodu (örn. 50). 0 ise trend filtresi kullanılmaz. |
-| **EMA_SLOW** | Yavaş EMA periyodu (örn. 200). Trend: Long için fiyat > EMA200 ve EMA50 > EMA200; Short için tersi. |
+| **EMA_FAST** | Rezerve (örnek stratejide kullanılmıyor). |
+| **EMA_SLOW** | >0 ise rejim: fiyat > EMA → sadece Long; fiyat ≤ EMA → sadece Short. |
 
-### 3.6 Strateji – RSI (Pullback) ve Hacim
+### 3.6 Strateji – RSI (trend yönü) ve Hacim
 
 | Değişken | Açıklama |
 |----------|----------|
 | **STRATEGY_RSI_PERIOD** | RSI hesaplama periyodu (örn. 7). |
-| **STRATEGY_RSI_LOW** | RSI bu değerin **altındaysa** Long pullback kabul edilir (örn. 35). |
-| **STRATEGY_RSI_HIGH** | RSI bu değerin **üstündeyse** Short pullback kabul edilir (örn. 65). |
+| **STRATEGY_RSI_LOW** | **Short** adayı: RSI **<** bu (zayıflık, varsayılan 45). |
+| **STRATEGY_RSI_HIGH** | **Long** adayı: RSI **>** bu (momentum, varsayılan 55). **HIGH > LOW** olmalı (orta bantta sinyal yok). |
+| **STRATEGY_RSI_SLOPE_ENABLE** | `true` (varsayılan): Long için RSI önceki muma göre **artmalı**; Short için **düşmeli** (range/fake breakout azaltır). `false` ile kapatılır. |
 | **STRATEGY_MIN_VOLUME_USD** | Son mumun quote (USDT) hacmi en az bu kadar olmalı (ek filtre). |
 | **STRATEGY_VOLUME_RATIO** | Son mumun hacmi, bir önceki mumun en az bu katı olabilir (ek filtre). |
 | **STRATEGY_VOLUME_AVG_PERIOD** | Ortalama hacim için geriye kaç mum kullanılacak (örn. 20). |
@@ -132,6 +133,7 @@ Dashboard’daki **Ayarlar** panelinden değiştirilen değerler **PostgreSQL**�
 - **STRATEGY_RSI_PERIOD**
 - **STRATEGY_RSI_LOW**
 - **STRATEGY_RSI_HIGH**
+- **STRATEGY_RSI_SLOPE_ENABLE**
 - **STRATEGY_MIN_VOLUME_USD**
 - **STRATEGY_VOLUME_RATIO**
 - **STRATEGY_VOLUME_AVG_PERIOD**
@@ -150,26 +152,19 @@ Her tarama turunda, her sembol için strateji şu sırayla çalışır. **Tek bi
 - **Interval** (STRATEGY_INTERVAL) ile son **N** mum çekilir. N, RSI periyodu, hacim ortalaması, ATR ve EMA200 için yeterli olacak şekilde büyütülür (en az 200+ mum gerekebilir).
 - Bu mumlardan: kapanış fiyatları, quote hacimler, high/low (ATR için) kullanılır.
 
-### 5.2 RSI + Hacim (Pullback + Volume Spike)
+### 5.2 RSI + Hacim (momentum / zayıflık + volume)
 
 - **RSI** (Wilder) son mum için hesaplanır.
-- **Long:** RSI < **STRATEGY_RSI_LOW** (örn. 35) ve hacim şartları sağlanıyorsa sinyal Long.
-- **Short:** RSI > **STRATEGY_RSI_HIGH** (örn. 65) ve hacim şartları sağlanıyorsa sinyal Short.
-- Hacim şartları:
-  - Son mumun USDT hacmi ≥ **STRATEGY_MIN_VOLUME_USD** veya önceki mumun **STRATEGY_VOLUME_RATIO** katı.
-  - **STRATEGY_VOLUME_AVG_PERIOD** ve **STRATEGY_VOLUME_MIN_RATIO_AVG** doluysa: son mumun hacmi ≥ (son N mumun ort. hacmi) × **STRATEGY_VOLUME_MIN_RATIO_AVG** (volume spike).
+- **Long adayı:** RSI **>** **STRATEGY_RSI_HIGH** (varsayılan 55) ve hacim OK; ayrıca **STRATEGY_RSI_SLOPE_ENABLE** açıksa güncel RSI **>** bir önceki mumun RSI’sı (eğim yukarı).
+- **Short adayı:** RSI **<** **STRATEGY_RSI_LOW** (varsayılan 45) ve hacim OK; slope açıksa güncel RSI **<** önceki mum RSI (eğim aşağı).
+- **LOW < RSI < HIGH** → Hold (nötr bant).
+- Hacim şartları (aynı):
+  - Son mum USDT hacmi ≥ **STRATEGY_MIN_VOLUME_USD** veya önceki mumun **STRATEGY_VOLUME_RATIO** katı.
+  - İsteğe bağlı volume spike: ortalama × **STRATEGY_VOLUME_MIN_RATIO_AVG**.
 
-Buradan çıkan ara sinyal: Long, Short veya Hold.
+### 5.3 EMA rejim filtresi
 
-### 5.3 Trend Filtresi (EMA)
-
-- **EMA_SLOW** (ve **EMA_FAST**) > 0 ise:
-  - Son fiyat = son mum kapanışı.
-  - EMA(EMA_SLOW) ve EMA(EMA_FAST) hesaplanır.
-  - **Uptrend:** fiyat > EMA200 ve EMA50 > EMA200.
-  - **Downtrend:** fiyat < EMA200 ve EMA50 < EMA200.
-- Sinyal **Long** ise sadece **uptrend**’de kalır; uptrend değilse Hold.
-- Sinyal **Short** ise sadece **downtrend**’de kalır; downtrend değilse Hold.
+- **EMA_SLOW** > 0 ise: son kapanış **>** EMA(EMA_SLOW) → yalnızca Long geçer; **≤** EMA → yalnızca Short. Ters yöndeki aday Hold olur.
 
 ### 5.4 Orderbook İmbalance (İsteğe Bağlı)
 
@@ -216,7 +211,7 @@ Buradan çıkan ara sinyal: Long, Short veya Hold.
 | SL/TP seviyeleri | STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT |
 | Mum zaman dilimi | STRATEGY_INTERVAL |
 | Trend (yukarı/aşağı) filtresi | EMA_FAST, EMA_SLOW |
-| RSI pullback hassasiyeti | STRATEGY_RSI_PERIOD, STRATEGY_RSI_LOW, STRATEGY_RSI_HIGH |
+| RSI bantları + eğim | STRATEGY_RSI_PERIOD, STRATEGY_RSI_LOW, STRATEGY_RSI_HIGH, STRATEGY_RSI_SLOPE_ENABLE |
 | Hacim / volume spike | STRATEGY_MIN_VOLUME_USD, STRATEGY_VOLUME_RATIO, STRATEGY_VOLUME_AVG_PERIOD, STRATEGY_VOLUME_MIN_RATIO_AVG |
 | Orderbook onayı | ORDERBOOK_IMBALANCE_ENABLE, ORDERBOOK_IMBALANCE_LONG_MIN, ORDERBOOK_IMBALANCE_SHORT_MAX, ORDERBOOK_DEPTH_LIMIT |
 | Volatilite filtresi | VOLATILITY_EXPANSION_ENABLE, ATR_PERIOD, ATR_EXPANSION_RATIO |

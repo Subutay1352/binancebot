@@ -631,8 +631,9 @@
       'MAX_TRADE_DURATION_MIN': 'Max işlem süresi (dk) – aşan pozisyon zorla kapatılır, 0=kapalı',
       'STRATEGY_INTERVAL': 'Mum aralığı (1m, 3m, 5m, 15m, 30m)',
       'STRATEGY_RSI_PERIOD': 'RSI periyodu',
-      'STRATEGY_RSI_LOW': 'RSI low (long eşiği)',
-      'STRATEGY_RSI_HIGH': 'RSI high (short eşiği)',
+      'STRATEGY_RSI_LOW': 'RSI short (RSI &lt; bu, downtrend)',
+      'STRATEGY_RSI_HIGH': 'RSI long (RSI &gt; bu, uptrend momentum)',
+      'STRATEGY_RSI_SLOPE_ENABLE': 'RSI eğim (long↑ short↓, true/false)',
       'STRATEGY_MIN_VOLUME_USD': 'Min hacim USD',
       'STRATEGY_VOLUME_RATIO': 'Hacim oranı (önceki mum)',
       'STRATEGY_VOLUME_AVG_PERIOD': 'Hacim ortalama periyot (0=kapalı)',
@@ -673,7 +674,7 @@
       if (btn) btn.disabled = true;
       if (status) status.textContent = 'Kaydediliyor...';
       var body = {};
-      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','COIN_COOLDOWN_MIN','MAX_TRADE_DURATION_MIN','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
+      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','COIN_COOLDOWN_MIN','MAX_TRADE_DURATION_MIN','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_RSI_SLOPE_ENABLE','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
       keys.forEach(function(key) {
         var el = document.getElementById('set_' + key);
         if (el) body[key] = el.value.trim();

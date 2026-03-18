@@ -58,20 +58,20 @@ type TradeConfig struct {
 	ExecutorPollSec    int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
 }
 
-// StrategyConfig hybrid strateji: trend (EMA) + RSI pullback + hacim + orderbook + volatility + liquidation.
+// StrategyConfig: EMA rejim + trend-yönlü RSI + hacim + orderbook + volatility.
 type StrategyConfig struct {
 	Interval            string  // Mum aralığı: "5m" (önerilen), "15m" daha stabil
-	RSIPeriod           int     // RSI periyodu (pullback için 7 önerilir)
-	RSIThresholdLow     float64 // Long pullback: RSI < bu (örn 35)
-	RSIThresholdHigh    float64 // Short pullback: RSI > bu (örn 65)
+	RSIPeriod           int     // RSI periyodu (7 önerilir)
+	RSIThresholdLow     float64 // Short: RSI < bu (zayıflık, örn 45). STRATEGY_RSI_LOW
+	RSIThresholdHigh    float64 // Long: RSI > bu (momentum, örn 55). STRATEGY_RSI_HIGH — HIGH > LOW olmalı
+	RSISlopeEnable      bool    // Long: RSI önceki muma göre artmalı; Short: düşmeli (fake breakout azaltır)
 	MinVolumeUSD        float64 // Hacim en az bu kadar USD (ek filtre)
 	VolumeRatioVsPrev   float64 // Son mumdan en az bu katı (ek filtre)
 	VolumeAvgPeriod     int     // Ortalama hacim için son N mum (20 önerilir)
 	VolumeMinRatioToAvg float64 // Mevcut hacim >= ortalama * bu oran (örn 1.8 = volume spike)
 
-	// Trend: EMA 50/200. Long: price > EMA200 && EMA50 > EMA200; Short: price < EMA200 && EMA50 < EMA200
-	EMAFast int // EMA hızlı (50 önerilir), 0=trend filtresi kapalı
-	EMASlow int // EMA yavaş (200 önerilir)
+	EMAFast int // (stratejide kullanılmıyor; rezerve)
+	EMASlow int // >0: fiyat > EMA → sadece long; değilse sadece short
 
 	// Orderbook imbalance: bid_vol/(bid_vol+ask_vol). > LongMin = alım, < ShortMax = satım
 	OrderbookImbalanceEnable  bool    // ORDERBOOK_IMBALANCE_ENABLE
@@ -90,12 +90,22 @@ type StrategyConfig struct {
 	LiquidationMinUSD        float64 // En az bu kadar USD (500k; BTC 2M, ETH 1M)
 }
 
+// EnsureRSIBands STRATEGY_RSI_HIGH > STRATEGY_RSI_LOW olmalı; aksi halde orta bant kaybolur, HIGH’ı düzeltir.
+func EnsureRSIBands(s *StrategyConfig) {
+	if s == nil {
+		return
+	}
+	if s.RSIThresholdHigh <= s.RSIThresholdLow {
+		s.RSIThresholdHigh = s.RSIThresholdLow + 5
+	}
+}
+
 // Load .env dosyasını yükler ve Config döner.
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	testnet := envBool("BINANCE_FUTURES_TESTNET", true)
-	return &Config{
+	cfg := &Config{
 		BotEnabled: envBool("BOT_ENABLED", true),
 		Binance: BinanceConfig{
 			APIKey:                os.Getenv("BINANCE_API_KEY"),
@@ -112,8 +122,9 @@ func Load() (*Config, error) {
 		Strategy: StrategyConfig{
 			Interval:            env("STRATEGY_INTERVAL", "5m"),
 			RSIPeriod:           envInt("STRATEGY_RSI_PERIOD", 7),
-			RSIThresholdLow:     envFloat("STRATEGY_RSI_LOW", 35),
-			RSIThresholdHigh:    envFloat("STRATEGY_RSI_HIGH", 65),
+			RSIThresholdLow:     envFloat("STRATEGY_RSI_LOW", 45),
+			RSIThresholdHigh:    envFloat("STRATEGY_RSI_HIGH", 55),
+			RSISlopeEnable:      envBool("STRATEGY_RSI_SLOPE_ENABLE", true),
 			MinVolumeUSD:        envFloat("STRATEGY_MIN_VOLUME_USD", 500_000),
 			VolumeRatioVsPrev:   envFloat("STRATEGY_VOLUME_RATIO", 1.5),
 			VolumeAvgPeriod:     envInt("STRATEGY_VOLUME_AVG_PERIOD", 20),
@@ -135,7 +146,9 @@ func Load() (*Config, error) {
 			LiquidationWindowSec:     envInt("LIQUIDATION_WINDOW_SEC", 10),
 			LiquidationMinUSD:        envFloat("LIQUIDATION_MIN_USD", 500_000),
 		},
-	}, nil
+	}
+	EnsureRSIBands(&cfg.Strategy)
+	return cfg, nil
 }
 
 func postgresFromEnv() PostgresConfig {
@@ -257,6 +270,11 @@ func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
 	if v, ok := parseFloat(overrides["STRATEGY_RSI_HIGH"]); ok {
 		out.Strategy.RSIThresholdHigh = v
 	}
+	if v, ok := overrides["STRATEGY_RSI_SLOPE_ENABLE"]; ok {
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			out.Strategy.RSISlopeEnable = b
+		}
+	}
 	if v, ok := parseFloat(overrides["STRATEGY_MIN_VOLUME_USD"]); ok {
 		out.Strategy.MinVolumeUSD = v
 	}
@@ -269,6 +287,7 @@ func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
 	if v, ok := parseFloat(overrides["STRATEGY_VOLUME_MIN_RATIO_AVG"]); ok {
 		out.Strategy.VolumeMinRatioToAvg = v
 	}
+	EnsureRSIBands(&out.Strategy)
 	return &out
 }
 
@@ -286,6 +305,7 @@ func RuntimeConfigFromConfig(cfg *Config) map[string]string {
 		"STRATEGY_RSI_PERIOD":             strconv.Itoa(cfg.Strategy.RSIPeriod),
 		"STRATEGY_RSI_LOW":                strconv.FormatFloat(cfg.Strategy.RSIThresholdLow, 'f', -1, 64),
 		"STRATEGY_RSI_HIGH":               strconv.FormatFloat(cfg.Strategy.RSIThresholdHigh, 'f', -1, 64),
+		"STRATEGY_RSI_SLOPE_ENABLE":       strconv.FormatBool(cfg.Strategy.RSISlopeEnable),
 		"STRATEGY_MIN_VOLUME_USD":         strconv.FormatFloat(cfg.Strategy.MinVolumeUSD, 'f', -1, 64),
 		"STRATEGY_VOLUME_RATIO":           strconv.FormatFloat(cfg.Strategy.VolumeRatioVsPrev, 'f', -1, 64),
 		"STRATEGY_VOLUME_AVG_PERIOD":      strconv.Itoa(cfg.Strategy.VolumeAvgPeriod),
