@@ -135,6 +135,38 @@ Bot zaten çalışırken dashboard aynı process’te açık. Tarayıcıda http:
 
 ---
 
+## Hızlı backtest (API, bot koduna dokunmaz)
+
+**Varsayılan:** proje kökünde `backtest.env` — canlı `.env` ve PostgreSQL’e dokunmaz.
+
+```bash
+cp backtest.env.example backtest.env
+# backtest.env içinde STRATEGY_* ve TRADE_SYMBOLS’u düzenle
+go run ./cmd/backtest-week -days 7 -mainnet
+go run ./cmd/backtest-week -batch 25 -days 7 -mainnet
+go run ./cmd/backtest-week -symbol BTCUSDT -days 7 -mainnet
+go run ./cmd/backtest-week -config ./path/to/other.env -days 3
+```
+
+**Canlı bot ayarıyla aynı denemek:** `.env` + isteğe DB:
+
+```bash
+go run ./cmd/backtest-week -live -days 7 -mainnet
+go run ./cmd/backtest-week -live -days 7 -mainnet -db
+```
+
+**Sadece flag (dosya yok):**
+
+```bash
+go run ./cmd/backtest-week -no-env -symbol ETHUSDT -min-vol 0 -ema-slow 100
+```
+
+**DB (`-db`):** Yalnızca `-live` ile; `runtime_config` üzerine yazar.
+
+Backtest, bot **Decide()** ile aynıdır: RSI + hacim + EMA + isteğe orderbook + ATR. **HTF / Asian / funding** env’de olsa bile sim’de **yok** (Decide’da iş yok).
+
+---
+
 ## Testnet sonrası (gerçek borsa)
 
 - `BINANCE_FUTURES_TESTNET=false`
