@@ -106,16 +106,23 @@ func Run(store *db.Store, bnClient *binance.Client, cfg *config.Config, tg *tele
 		}
 		stepSize := info.MarketLotSizeFilter().StepSize
 		qtyStr := binance.FormatQuantityForAPI(trade.Quantity, stepSize)
-		if err := bnClient.ClosePositionMarket(ctx, symbol, trade.Side, qtyStr); err != nil {
+		orderID, err := bnClient.ClosePositionMarket(ctx, symbol, trade.Side, qtyStr)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "pozisyon kapatılamadı: " + err.Error()})
 			return
 		}
-		time.Sleep(500 * time.Millisecond)
 		var exitPrice float64
-		if cfg.Binance.Testnet {
+		if !cfg.Binance.Testnet {
+			exitPrice, _ = bnClient.WaitExitVWAPAfterMarketClose(ctx, symbol, orderID)
+		}
+		if exitPrice <= 0 {
+			exitPrice, _ = bnClient.GetExitPriceVWAPAfterClose(ctx, symbol, trade.Side, trade.Quantity, time.Now().Add(-90*time.Minute))
+		}
+		if exitPrice <= 0 && cfg.Binance.Testnet {
 			exitPrice, _ = bnClient.GetPrice(ctx, symbol)
-		} else {
-			since := time.Now().Add(-2 * time.Minute)
+		}
+		if exitPrice <= 0 && !cfg.Binance.Testnet {
+			since := time.Now().Add(-5 * time.Minute)
 			exitPrice, err = bnClient.GetRecentCloseFillPrice(ctx, symbol, trade.Side, since)
 			if err != nil {
 				exitPrice, _ = bnClient.GetPrice(ctx, symbol)

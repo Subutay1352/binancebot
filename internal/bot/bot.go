@@ -589,11 +589,18 @@ func (b *Bot) closeTradeNow(ctx context.Context, t *db.Trade, reason string) err
 	}
 	stepSize := info.MarketLotSizeFilter().StepSize
 	qtyStr := binance.FormatQuantityForAPI(t.Quantity, stepSize)
-	if err := b.client.ClosePositionMarket(ctx, t.Symbol, t.Side, qtyStr); err != nil {
+	orderID, err := b.client.ClosePositionMarket(ctx, t.Symbol, t.Side, qtyStr)
+	if err != nil {
 		return err
 	}
-	time.Sleep(500 * time.Millisecond)
-	exitPrice, _ := b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, time.Now().Add(-2*time.Minute))
+	exitPrice, _ := b.client.WaitExitVWAPAfterMarketClose(ctx, t.Symbol, orderID)
+	if exitPrice <= 0 {
+		since := time.Now().Add(-90 * time.Minute)
+		exitPrice, _ = b.client.GetExitPriceVWAPAfterClose(ctx, t.Symbol, t.Side, t.Quantity, since)
+	}
+	if exitPrice <= 0 {
+		exitPrice, _ = b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, time.Now().Add(-5*time.Minute))
+	}
 	var realizedPnl float64
 	if b.cfg.Binance.Testnet {
 		if exitPrice == 0 {
@@ -631,8 +638,17 @@ func (b *Bot) checkPositionClosed(ctx context.Context, t *db.Trade, lookback tim
 	if lookback > 0 {
 		since = time.Now().Add(-lookback)
 	}
-	// Gerçek kapanış fill fiyatı (userTrades; testnet'te bazen boş)
-	exitPrice, _ := b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, since)
+	tradeSince := t.OpenedAt.Add(-2 * time.Minute)
+	if tradeSince.After(time.Now()) {
+		tradeSince = time.Now().Add(-15 * time.Minute)
+	}
+	exitPrice, _ := b.client.GetExitPriceVWAPAfterClose(ctx, t.Symbol, t.Side, t.Quantity, tradeSince)
+	if exitPrice <= 0 {
+		exitPrice, _ = b.client.GetExitPriceVWAPAfterClose(ctx, t.Symbol, t.Side, t.Quantity, time.Now().Add(-90*time.Minute))
+	}
+	if exitPrice <= 0 {
+		exitPrice, _ = b.client.GetRecentCloseFillPrice(ctx, t.Symbol, t.Side, since)
+	}
 	var realizedPnl float64
 	if b.cfg.Binance.Testnet {
 		// Testnet'te Income API realized PnL dönmeyebilir; kendimiz hesaplayıp yazıyoruz
@@ -673,7 +689,7 @@ func (b *Bot) checkPositionClosed(ctx context.Context, t *db.Trade, lookback tim
 			realizedPnl = b.realizedPnl(t, exitPrice)
 			log.Printf("[trade] KAPANIŞ | exit/PNL tahmini (userTrades+Income yok)")
 		} else if exitPrice > 0 {
-			log.Printf("[trade] KAPANIŞ | exit_price userTrades: %.8f | realized_pnl Income: %.4f", exitPrice, realizedPnl)
+			log.Printf("[trade] KAPANIŞ | exit_price VWAP (userTrades): %.8f | realized_pnl Income: %.4f", exitPrice, realizedPnl)
 		}
 	}
 	balanceAfter, _ := b.client.GetUSDTBalance(ctx)
@@ -774,13 +790,13 @@ func (b *Bot) openPosition(ctx context.Context, symbol string, sig strategy.Sign
 	_, errSL := b.client.PlaceStopLoss(ctx, symbol, slSide, qtyStr, slStr)
 	if errSL != nil {
 		log.Printf("[trade] SL KONAMADI | symbol=%s: %v → pozisyon kapatılıyor", symbol, errSL)
-		_ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
+		_, _ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
 		return fmt.Errorf("stop loss konamadı: %w", errSL)
 	}
 	_, errTP := b.client.PlaceTakeProfit(ctx, symbol, slSide, qtyStr, tpStr)
 	if errTP != nil {
 		log.Printf("[trade] TP KONAMADI | symbol=%s: %v → pozisyon kapatılıyor", symbol, errTP)
-		_ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
+		_, _ = b.client.ClosePositionMarket(ctx, symbol, side, qtyStr)
 		return fmt.Errorf("take profit konamadı: %w", errTP)
 	}
 

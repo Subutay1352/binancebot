@@ -102,14 +102,14 @@ func (c *Client) PlaceTakeProfit(ctx context.Context, symbol string, side future
 	return c.PlaceTakeProfitAlgo(ctx, symbol, side, stopPrice)
 }
 
-// ClosePositionMarket pozisyonu ters yönde market emirle kapatır (SL/TP konamadığında kullan). quantityStr step size formatında.
-func (c *Client) ClosePositionMarket(ctx context.Context, symbol string, side string, quantityStr string) error {
+// ClosePositionMarket pozisyonu ters yönde market emirle kapatır. Dönen orderId ile fill VWAP alınabilir.
+func (c *Client) ClosePositionMarket(ctx context.Context, symbol string, side string, quantityStr string) (orderID int64, err error) {
 	closeSide := futures.SideTypeSell
 	if side == "SHORT" {
 		closeSide = futures.SideTypeBuy
 	}
 	log.Printf("[binance] CLOSE_POSITION_MARKET | symbol=%s side=%s quantity=%s", symbol, closeSide, quantityStr)
-	_, err := c.api.NewCreateOrderService().
+	resp, err := c.api.NewCreateOrderService().
 		Symbol(symbol).
 		Side(closeSide).
 		Type(futures.OrderTypeMarket).
@@ -118,10 +118,11 @@ func (c *Client) ClosePositionMarket(ctx context.Context, symbol string, side st
 		Do(ctx)
 	if err != nil {
 		log.Printf("[binance] CLOSE_POSITION_MARKET hata | symbol=%s: %v", symbol, err)
-		return err
+		return 0, err
 	}
-	log.Printf("[binance] CLOSE_POSITION_MARKET OK | symbol=%s", symbol)
-	return nil
+	oid := resp.OrderID
+	log.Printf("[binance] CLOSE_POSITION_MARKET OK | symbol=%s orderId=%d", symbol, oid)
+	return oid, nil
 }
 
 // GetPosition sembol için açık pozisyon; yoksa nil.
@@ -178,7 +179,7 @@ func (c *Client) CloseAllOpenPositions(ctx context.Context) error {
 		if amt < 0 {
 			side = "SHORT"
 		}
-		if err := c.ClosePositionMarket(ctx, p.Symbol, side, qtyStr); err != nil {
+		if _, err := c.ClosePositionMarket(ctx, p.Symbol, side, qtyStr); err != nil {
 			log.Printf("[binance] pozisyon kapatma hata | symbol=%s: %v", p.Symbol, err)
 			continue
 		}
