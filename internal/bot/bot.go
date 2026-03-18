@@ -38,8 +38,9 @@ type Bot struct {
 	mu            sync.Mutex
 	activeSymbols map[string]struct{} // Şu an executor'da olan semboller (çift giriş engeli)
 
-	openSlotMu    sync.Mutex // Açılış sırasında race önler
-	reservedSlots int       // Şu an openPosition() içinde olan executor sayısı (açılış bitince hemen düşer)
+	openSlotMu       sync.Mutex // Açılış sırasında race önler
+	reservedLong     int        // openPosition() süren LONG sayısı
+	reservedShort    int        // openPosition() süren SHORT sayısı
 
 	rateLimitMu   sync.Mutex
 	rateLimitUntil time.Time // -1003 ban süresi; bu süreye kadar scanner/executor API çağrısı yapmaz
@@ -339,8 +340,12 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 	}
 
 	if existingTrade == nil {
-		// Limit: açık + "açılış yapıyor" (rezerve) sayısı max'ı geçmesin; rezerve openPosition bitince hemen düşer
-		if b.cfg.Trade.MaxOpenTrades > 0 {
+		eff := b.getEffective()
+		maxOpen := b.cfg.Trade.MaxOpenTrades
+		w := eff.Trade.MaxDirectionWeight
+		perSide := maxOpenPerSide(maxOpen, w)
+
+		if maxOpen > 0 || perSide >= 0 {
 			b.openSlotMu.Lock()
 			openList, err := b.store.OpenTrades(ctx)
 			if err != nil {
@@ -348,20 +353,41 @@ func (b *Bot) runExecutor(ctx context.Context, symbol string, sig strategy.Signa
 				log.Printf("[executor] %s açık pozisyon sayısı alınamadı: %v", symbol, err)
 				return
 			}
-			used := len(openList) + b.reservedSlots
-			if used >= b.cfg.Trade.MaxOpenTrades {
+			inFlight := b.reservedLong + b.reservedShort
+			if maxOpen > 0 && len(openList)+inFlight >= maxOpen {
 				b.openSlotMu.Unlock()
-				log.Printf("[executor] %s atlandı | max (açık=%d + açılışta=%d >= max=%d)", symbol, len(openList), b.reservedSlots, b.cfg.Trade.MaxOpenTrades)
+				log.Printf("[executor] %s atlandı | max açık (açık=%d + açılışta=%d >= %d)", symbol, len(openList), inFlight, maxOpen)
 				return
 			}
-			b.reservedSlots++
+			longN, shortN := countOpenSides(openList)
+			if sig == strategy.Long {
+				if perSide >= 0 && longN+b.reservedLong >= perSide {
+					b.openSlotMu.Unlock()
+					log.Printf("[executor] %s atlandı | LONG limit (açık long=%d + açılışta long=%d >= %d, MAX_DIRECTION_WEIGHT=%.2f)",
+						symbol, longN, b.reservedLong, perSide, w)
+					return
+				}
+				b.reservedLong++
+			} else {
+				if perSide >= 0 && shortN+b.reservedShort >= perSide {
+					b.openSlotMu.Unlock()
+					log.Printf("[executor] %s atlandı | SHORT limit (açık short=%d + açılışta short=%d >= %d, MAX_DIRECTION_WEIGHT=%.2f)",
+						symbol, shortN, b.reservedShort, perSide, w)
+					return
+				}
+				b.reservedShort++
+			}
 			b.openSlotMu.Unlock()
 		}
 
 		err := b.openPosition(ctx, symbol, sig)
-		if b.cfg.Trade.MaxOpenTrades > 0 {
+		if maxOpen > 0 || perSide >= 0 {
 			b.openSlotMu.Lock()
-			b.reservedSlots--
+			if sig == strategy.Long {
+				b.reservedLong--
+			} else {
+				b.reservedShort--
+			}
 			b.openSlotMu.Unlock()
 		}
 		if err != nil {
@@ -932,4 +958,27 @@ func roundToStep(qty float64, stepStr string) float64 {
 	}
 	inv := 1.0 / step
 	return float64(int64(qty*inv)) * step
+}
+
+// maxOpenPerSide MAX_OPEN_TRADES>0 ve 0<w≤1 iken tek yöndeki üst sınır; aksi -1 (kapalı).
+func maxOpenPerSide(maxOpen int, w float64) int {
+	if maxOpen <= 0 || w <= 0 || w > 1 {
+		return -1
+	}
+	n := int(float64(maxOpen) * w)
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func countOpenSides(trades []db.Trade) (longN, shortN int) {
+	for i := range trades {
+		if strings.EqualFold(strings.TrimSpace(trades[i].Side), "LONG") {
+			longN++
+		} else {
+			shortN++
+		}
+	}
+	return
 }

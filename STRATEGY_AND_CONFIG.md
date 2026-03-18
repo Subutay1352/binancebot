@@ -125,7 +125,9 @@ Tarama aralığı, sembol listesi, SL/TP, strateji parametreleri hep config’te
 
 Dashboard’daki **Ayarlar** panelinden değiştirilen değerler **PostgreSQL**’de `runtime_config` tablosunda **key–value** olarak saklanır. Bot her turda önce bu tabloyu okur; bir anahtar varsa **env yerine bu değer** kullanılır. Yani deploy etmeden sadece UI’dan güncelleyebilirsin.
 
-**UI’dan değiştirilebilir anahtarlar** (env ile aynı isim):
+**UI’dan değiştirilebilir anahtarlar** (çoğu env ile aynı isim):
+
+- **MAX_DIRECTION_WEIGHT** — **Sadece DB / UI** (`.env` yok). `0` veya boş = kapalı. Örn. `0.6` ve **MAX_OPEN_TRADES=10** iken tek yönde en fazla **6** açık LONG veya **6** açık SHORT (açılış sırasında bekleyen executor’lar da sayılır). `MAX_OPEN_TRADES` 0 iken bu limit uygulanmaz.
 
 - **STOP_LOSS_PERCENT**
 - **TAKE_PROFIT_PERCENT**

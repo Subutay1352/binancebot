@@ -637,7 +637,8 @@
       'STRATEGY_MIN_VOLUME_USD': 'Min hacim USD',
       'STRATEGY_VOLUME_RATIO': 'Hacim oranı (önceki mum)',
       'STRATEGY_VOLUME_AVG_PERIOD': 'Hacim ortalama periyot (0=kapalı)',
-      'STRATEGY_VOLUME_MIN_RATIO_AVG': 'Hacim min oran ort.'
+      'STRATEGY_VOLUME_MIN_RATIO_AVG': 'Hacim min oran ort.',
+      'MAX_DIRECTION_WEIGHT': 'Tek yön limiti (0–1, sadece DB) — örn. 0.6 + MAX_OPEN_TRADES=10 → yönde max 6; 0=kapalı'
     };
     function toggleSettings() {
       var sec = document.getElementById('settingsSection');
@@ -674,7 +675,7 @@
       if (btn) btn.disabled = true;
       if (status) status.textContent = 'Kaydediliyor...';
       var body = {};
-      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','COIN_COOLDOWN_MIN','MAX_TRADE_DURATION_MIN','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_RSI_SLOPE_ENABLE','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG'];
+      var keys = ['STOP_LOSS_PERCENT','TAKE_PROFIT_PERCENT','COIN_COOLDOWN_MIN','MAX_TRADE_DURATION_MIN','STRATEGY_INTERVAL','STRATEGY_RSI_PERIOD','STRATEGY_RSI_LOW','STRATEGY_RSI_HIGH','STRATEGY_RSI_SLOPE_ENABLE','STRATEGY_MIN_VOLUME_USD','STRATEGY_VOLUME_RATIO','STRATEGY_VOLUME_AVG_PERIOD','STRATEGY_VOLUME_MIN_RATIO_AVG','MAX_DIRECTION_WEIGHT'];
       keys.forEach(function(key) {
         var el = document.getElementById('set_' + key);
         if (el) body[key] = el.value.trim();

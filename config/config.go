@@ -53,6 +53,8 @@ type TradeConfig struct {
 	MaxLossesIn12h     int     // Aynı sembolde son 12 saatte bu sayıdan fazla zarar varsa o sembole tekrar açılmaz (0=kapalı)
 	CoinCooldownMin       int     // Bir sembol kapandıktan sonra bu dakika boyunca tekrar açılmaz (0=kapalı, DB runtime)
 	MaxTradeDurationMin   int     // Açık pozisyon bu dakikayı aşarsa zorla kapatılır (0=kapalı, DB runtime)
+	// MaxDirectionWeight sadece runtime_config (DB); 0 = kapalı. 0<w≤1 iken tek yönde en fazla int(MAX_OPEN_TRADES*w) pozisyon
+	MaxDirectionWeight float64
 	MinBalanceShutdown    float64 // Futures bakiyesi bu değerin altına inerse bot kapanır (0=kapalı)
 	InstanceID         string  // Hangi makine/süreç (BOT_INSTANCE_ID veya hostname)
 	ExecutorPollSec    int     // SL/TP kapanış kontrolü kaç saniyede bir (EXECUTOR_POLL_INTERVAL_SEC, 0=varsayılan 60)
@@ -287,6 +289,15 @@ func ApplyRuntimeOverrides(base *Config, overrides map[string]string) *Config {
 	if v, ok := parseFloat(overrides["STRATEGY_VOLUME_MIN_RATIO_AVG"]); ok {
 		out.Strategy.VolumeMinRatioToAvg = v
 	}
+	if s := strings.TrimSpace(overrides["MAX_DIRECTION_WEIGHT"]); s != "" {
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			if f <= 0 || f > 1 {
+				out.Trade.MaxDirectionWeight = 0
+			} else {
+				out.Trade.MaxDirectionWeight = f
+			}
+		}
+	}
 	EnsureRSIBands(&out.Strategy)
 	return &out
 }
@@ -310,6 +321,7 @@ func RuntimeConfigFromConfig(cfg *Config) map[string]string {
 		"STRATEGY_VOLUME_RATIO":           strconv.FormatFloat(cfg.Strategy.VolumeRatioVsPrev, 'f', -1, 64),
 		"STRATEGY_VOLUME_AVG_PERIOD":      strconv.Itoa(cfg.Strategy.VolumeAvgPeriod),
 		"STRATEGY_VOLUME_MIN_RATIO_AVG":   strconv.FormatFloat(cfg.Strategy.VolumeMinRatioToAvg, 'f', -1, 64),
+		"MAX_DIRECTION_WEIGHT":          strconv.FormatFloat(cfg.Trade.MaxDirectionWeight, 'f', -1, 64),
 	}
 }
 
